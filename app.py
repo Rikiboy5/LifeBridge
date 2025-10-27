@@ -35,7 +35,7 @@ def get_users():
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT id, name, email FROM users ORDER BY id DESC")
+        cur.execute("SELECT * FROM users ORDER BY id_user DESC")
         rows = cur.fetchall()
         return jsonify(rows), 200
     finally:

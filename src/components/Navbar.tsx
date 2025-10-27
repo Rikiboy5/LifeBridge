@@ -45,6 +45,12 @@ export default function Navbar() {
           >
             Profil
           </Link>
+          <Link
+  to="/users"
+  className="text-gray-800 dark:text-gray-200 font-medium hover:text-blue-600 dark:hover:text-blue-400 transition"
+>
+  Používatelia
+</Link>
         </div>
 
         {/* Vyhľadávanie */}
@@ -57,9 +63,7 @@ export default function Navbar() {
           <span className="text-gray-500 dark:text-gray-400 ml-2">🔍</span>
         </div>
       </div>
-        <a href="/users" className="text-gray-800 dark:text-gray-200 font-medium hover:text-blue-600">
-  Používatelia
-</a>
+
       {/* Prepínač témy */}
       <button
         onClick={() => setTheme(theme === "light" ? "dark" : "light")}
