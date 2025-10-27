@@ -62,10 +62,10 @@ def register_user():
         cur = conn.cursor(dictionary=True)
         cur.execute(
             """
-            INSERT INTO users (meno, priezvisko, datum_narodenia, mail, heslo)
+            INSERT INTO users (name, surname, email, password, birthdate)
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (name, surname, email, hashed_pw, hobby, birthdate)
+            (name, surname, email, hashed_pw, birthdate)
         )
         conn.commit()
         return jsonify({"success": True, "user": f"{name} {surname}"}), 201
@@ -101,6 +101,7 @@ def login_user():
                 "name": user["name"],
                 "surname": user["surname"],
                 "email": user["email"],
+                "birthdate": user["birthdate"]
             }
         }), 200
     finally:
@@ -108,29 +109,14 @@ def login_user():
         conn.close()
 
 # ==========================================
-# 🎯 ZÁĽUBY (dropdown)
-# ==========================================
-@app.get("/api/hobby")
-def get_hobbies():
-    conn = get_conn()
-    try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM hobby ORDER BY nazov ASC")
-        rows = cur.fetchall()
-        return jsonify(rows), 200
-    finally:
-        cur.close()
-        conn.close()
-
-# ==========================================
-# 👥 POUŽÍVATELIA (len test)
+# 👥 POUŽÍVATELIA (test)
 # ==========================================
 @app.get("/api/users")
 def get_users():
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM users ORDER BY id_user DESC")
+        cur.execute("SELECT id_user, name, surname, email, birthdate FROM users ORDER BY id_user DESC")
         rows = cur.fetchall()
         return jsonify(rows), 200
     finally:
