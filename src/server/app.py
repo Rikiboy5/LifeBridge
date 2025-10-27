@@ -2,10 +2,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import mysql.connector.pooling
-from auth_routes import auth_bp, bcrypt
-app.register_blueprint(auth_bp)
-bcrypt.init_app(app)
-
 import os
 
 app = Flask(__name__)
@@ -34,6 +30,13 @@ pool = mysql.connector.pooling.MySQLConnectionPool(
 def get_conn():
     return pool.get_connection()
 
+# Import až po vytvorení app a get_conn() — aby nevznikol cyklus
+from auth_routes import auth_bp, bcrypt
+
+app.register_blueprint(auth_bp)
+bcrypt.init_app(app)
+
+# ===== API ROUTES =====
 @app.get("/api/users")
 def get_users():
     conn = get_conn()
