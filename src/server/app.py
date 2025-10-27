@@ -43,7 +43,6 @@ def register_user():
     surname = data.get("surname")
     email = data.get("email")
     password = data.get("password")
-    hobbies = data.get("hobbies")
     birthdate = data.get("birthdate")
 
     if not all([name, surname, email, password, birthdate]):
@@ -63,10 +62,10 @@ def register_user():
         cur = conn.cursor(dictionary=True)
         cur.execute(
             """
-            INSERT INTO users (name, surname, email, password, hobbies, birthdate)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO users (meno, priezvisko, datum_narodenia, mail, heslo)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (name, surname, email, hashed_pw, hobbies, birthdate)
+            (name, surname, email, hashed_pw, hobby, birthdate)
         )
         conn.commit()
         return jsonify({"success": True, "user": f"{name} {surname}"}), 201
@@ -116,7 +115,7 @@ def get_hobbies():
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT id_hobby, name FROM hobbies ORDER BY name ASC")
+        cur.execute("SELECT * FROM hobby ORDER BY nazov ASC")
         rows = cur.fetchall()
         return jsonify(rows), 200
     finally:
@@ -131,7 +130,7 @@ def get_users():
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT id_user, name, surname, email, hobbies, birthdate FROM users ORDER BY id_user DESC")
+        cur.execute("SELECT * FROM users ORDER BY id_user DESC")
         rows = cur.fetchall()
         return jsonify(rows), 200
     finally:

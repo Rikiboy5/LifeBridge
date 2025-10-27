@@ -7,16 +7,13 @@ export default function Register() {
     email: "",
     password: "",
     birthdate: "",
-    hobby: "",
   });
-  const [hobbies, setHobbies] = useState<any[]>([]);
   const [message, setMessage] = useState("");
 
   // Načítanie záľub z backendu
   useEffect(() => {
-    fetch("/api/hobbies")
+    fetch("/api/hobby")
       .then((res) => res.json())
-      .then((data) => setHobbies(data))
       .catch(() => setMessage("Nepodarilo sa načítať záľuby 😢"));
   }, []);
 
@@ -37,7 +34,6 @@ export default function Register() {
           surname: form.surname,
           email: form.email,
           password: form.password,
-          hobbies: form.hobby,
           birthdate: form.birthdate,
         }),
       });
@@ -46,7 +42,7 @@ export default function Register() {
       if (!res.ok) throw new Error(data.error || "Chyba pri registrácii");
 
       setMessage(`Úspešne zaregistrovaný ako ${data.user}`);
-      setForm({ name: "", surname: "", email: "", password: "", birthdate: "", hobby: "" });
+      setForm({ name: "", surname: "", email: "", password: "", birthdate: ""});
     } catch (err: any) {
       setMessage(err.message);
     }
@@ -100,19 +96,6 @@ export default function Register() {
           className="w-full p-2 border rounded-md"
         />
 
-        <select
-          name="hobby"
-          value={form.hobby}
-          onChange={handleChange}
-          className="w-full p-2 border rounded-md"
-        >
-          <option value="">Vyber záľubu</option>
-          {hobbies.map((h) => (
-            <option key={h.id_hobby} value={h.name}>
-              {h.name}
-            </option>
-          ))}
-        </select>
 
         <button
           type="submit"
