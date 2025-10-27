@@ -111,7 +111,7 @@ def login_user():
 # ==========================================
 # 🎯 ZÁĽUBY (dropdown)
 # ==========================================
-@app.get("/api/hobbies")
+@app.get("/api/hobby")
 def get_hobbies():
     conn = get_conn()
     try:
