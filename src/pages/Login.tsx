@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import MainLayout from "../layouts/MainLayout";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -37,6 +38,7 @@ export default function Login() {
   };
 
   return (
+    <MainLayout>
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-blue-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
       <form
         onSubmit={handleSubmit}
@@ -79,5 +81,6 @@ export default function Login() {
         )}
       </form>
     </div>
+    </MainLayout>
   );
 }
