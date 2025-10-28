@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import MainLayout from "../layouts/MainLayout";
 
 export default function Register() {
   const [form, setForm] = useState({
@@ -44,6 +45,7 @@ export default function Register() {
   };
 
   return (
+    <MainLayout>
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-blue-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
       <form
         onSubmit={handleSubmit}
@@ -112,5 +114,7 @@ export default function Register() {
         )}
       </form>
     </div>
+    </MainLayout>
   );
+  
 }

@@ -11,11 +11,11 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 bcrypt = Bcrypt(app)
 
 # 🔧 DB konfigurácia
-DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASS = os.getenv("DB_PASS", "root")
-DB_NAME = os.getenv("DB_NAME", "LifeBridge")
-DB_PORT = int(os.getenv("DB_PORT", "8889"))
+DB_HOST = os.getenv("DB_HOST", "sql7.freesqldatabase.com")
+DB_USER = os.getenv("DB_USER", "sql7804820")
+DB_PASS = os.getenv("DB_PASS", "mZhcUrwhAS")
+DB_NAME = os.getenv("DB_NAME", "sql7804820")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
 
 # 🧩 Connection pool
 pool = mysql.connector.pooling.MySQLConnectionPool(
@@ -85,23 +85,23 @@ def login_user():
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+        cur.execute("SELECT * FROM users WHERE mail = %s", (email,))
         user = cur.fetchone()
 
         if not user:
             return jsonify({"error": "Používateľ neexistuje."}), 404
 
-        if not bcrypt.check_password_hash(user["password"], password):
+        if not bcrypt.check_password_hash(user["heslo"], password):
             return jsonify({"error": "Nesprávne heslo."}), 401
 
         return jsonify({
             "success": True,
             "user": {
                 "id": user["id_user"],
-                "name": user["name"],
-                "surname": user["surname"],
-                "email": user["email"],
-                "birthdate": user["birthdate"]
+                "name": user["meno"],
+                "surname": user["priezvisko"],
+                "email": user["mail"],
+                "birthdate": user["datum_narodenia"]
             }
         }), 200
     finally:
@@ -117,7 +117,7 @@ def get_users():
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT id_user, name, surname, email, birthdate FROM users ORDER BY id_user DESC")
+        cur.execute("SELECT * FROM users ORDER BY id_user DESC")
         rows = cur.fetchall()
         return jsonify(rows), 200
     finally:
