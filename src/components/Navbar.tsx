@@ -30,6 +30,12 @@ export default function Navbar() {
         >
           Domov
         </Link>
+                <Link
+          to="/users"
+          className="text-gray-700 dark:text-gray-300 hover:text-blue-600 transition"
+        >
+          Používatelia
+        </Link>
         {user && (
           <Link
             to="/profil"
