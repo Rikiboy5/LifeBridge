@@ -1,39 +1,83 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 export default function Login() {
-  const [form, setForm] = useState({ mail: "", heslo: "" });
-  const [user, setUser] = useState<any>(null);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm({ ...form, [e.target.name]: e.target.value });
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch("/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json();
-    if (data.user) setUser(data.user);
-    alert(data.message || data.error);
+    setMessage("");
+
+    if (!email || !password) {
+      setMessage("Vyplň email aj heslo.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Prihlásenie zlyhalo.");
+
+      // uložíme prihláseného používateľa
+      localStorage.setItem("user", JSON.stringify(data.user));
+
+      setMessage(`Vitaj späť, ${data.user.name}! 👋`);
+      setTimeout(() => navigate("/"), 1000);
+    } catch (err: any) {
+      setMessage("❌ " + err.message);
+    }
   };
 
   return (
-    <div className="max-w-md mx-auto mt-10 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg">
-      <h2 className="text-2xl font-bold mb-4">Prihlásenie</h2>
-      <form onSubmit={handleSubmit}>
-        <input name="mail" placeholder="E-mail" className="w-full mb-3 p-2 border rounded" onChange={handleChange} />
-        <input type="password" name="heslo" placeholder="Heslo" className="w-full mb-3 p-2 border rounded" onChange={handleChange} />
-        <button type="submit" className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700">
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-blue-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white dark:bg-gray-900 shadow-xl rounded-2xl p-8 w-full max-w-md text-gray-800 dark:text-gray-100 space-y-4"
+      >
+        <h2 className="text-2xl font-bold text-center text-blue-700 dark:text-blue-400">
+          Prihlásenie
+        </h2>
+
+        <input
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-400 focus:outline-none"
+        />
+        <input
+          type="password"
+          placeholder="Heslo"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-400 focus:outline-none"
+        />
+
+        <button
+          type="submit"
+          className="w-full mt-4 bg-blue-600 text-white font-semibold p-2 rounded-md hover:bg-blue-700 transition"
+        >
           Prihlásiť sa
         </button>
+
+        {message && (
+          <p
+            className={`text-center mt-3 text-sm ${
+              message.startsWith("Vitaj") ? "text-green-600" : "text-red-500"
+            }`}
+          >
+            {message}
+          </p>
+        )}
       </form>
-      {user && (
-        <p className="mt-4 text-center text-green-500">
-          Vitaj späť, {user.meno} {user.priezvisko}!
-        </p>
-      )}
     </div>
   );
 }

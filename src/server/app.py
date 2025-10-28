@@ -62,10 +62,10 @@ def register_user():
         cur = conn.cursor(dictionary=True)
         cur.execute(
             """
-            INSERT INTO users (meno, priezvisko, datum_narodenia, mail, heslo)
+            INSERT INTO users (name, surname, email, password, birthdate)
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (name, surname, birthdate, email, hashed_pw)
+            (name, surname, email, hashed_pw, birthdate)
         )
         conn.commit()
         return jsonify({"success": True, "user": f"{name} {surname}"}), 201
@@ -85,7 +85,7 @@ def login_user():
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM users WHERE mail = %s", (email,))
+        cur.execute("SELECT * FROM users WHERE email = %s", (email,))
         user = cur.fetchone()
 
         if not user:
@@ -108,6 +108,7 @@ def login_user():
         cur.close()
         conn.close()
 
+
 # ==========================================
 # 👥 POUŽÍVATELIA (test)
 # ==========================================
@@ -116,7 +117,7 @@ def get_users():
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM users ORDER BY id_user DESC")
+        cur.execute("SELECT id_user, name, surname, email, birthdate FROM users ORDER BY id_user DESC")
         rows = cur.fetchall()
         return jsonify(rows), 200
     finally:
