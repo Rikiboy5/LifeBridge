@@ -41,7 +41,7 @@ export default function Users() {
       {users.length === 0 ? (
         <p className="text-gray-500 text-center">Zatiaľ žiadni používatelia.</p>
       ) : (
-        <ul className="divide-y divide-gray-300 dark:divide-gray-700">
+        <ul className="divide-y divide-gray-3 00 dark:divide-gray-700">
           {users.map((u) => (
             <li key={u.id_user} className="py-3 flex justify-between items-center">
               <div>
