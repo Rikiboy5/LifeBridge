@@ -129,3 +129,63 @@ def get_users():
 # ==========================================
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
+
+# ==========================================
+# 📝 PRÍSPEVKY
+# ==========================================
+
+@app.get("/api/posts")
+def get_posts():
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT p.id_post, p.title, p.description, p.image, p.category,
+                   u.meno AS name, u.priezvisko AS surname, u.location
+            FROM posts p
+            JOIN users u ON u.id_user = p.user_id
+            ORDER BY p.id_post DESC
+        """)
+        return jsonify(cur.fetchall()), 200
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.post("/api/posts")
+def create_post():
+    data = request.get_json(force=True)
+    title = data.get("title")
+    description = data.get("description")
+    image = data.get("image")
+    category = data.get("category")
+    user_id = data.get("user_id")
+
+    if not all([title, description, category, user_id]):
+        return jsonify({"error": "Všetky polia sú povinné."}), 400
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO posts (title, description, image, category, user_id)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (title, description, image, category, user_id))
+        conn.commit()
+        return jsonify({"success": True}), 201
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.delete("/api/posts/<int:post_id>")
+def delete_post(post_id):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM posts WHERE id_post = %s", (post_id,))
+        conn.commit()
+        return jsonify({"success": True}), 200
+    finally:
+        cur.close()
+        conn.close()
