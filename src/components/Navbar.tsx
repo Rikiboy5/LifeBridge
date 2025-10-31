@@ -44,6 +44,7 @@ export default function Navbar() {
             Profil
           </Link>
         )}
+        
         {!user && (
           <>
             <Link
@@ -60,6 +61,12 @@ export default function Navbar() {
             </Link>
           </>
         )}
+            <Link
+            to="/posts"
+            className="text-gray-700 dark:text-gray-300 hover:text-blue-600 transition"
+            >
+              Príspevky
+            </Link>
       </div>
 
       {user && (

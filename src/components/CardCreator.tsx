@@ -2,12 +2,19 @@ import { useState } from "react";
 
 interface CardCreatorProps {
   onClose: () => void;
+  onSave: (data: {
+    title: string;
+    description: string;
+    image?: string | null;
+    category: string;
+  }) => void;
 }
 
-export default function CardCreator({ onClose }: CardCreatorProps) {
+export default function CardCreator({ onClose, onSave }: CardCreatorProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [image, setImage] = useState<string | null>(null);
+  const [category, setCategory] = useState("Dobrovoľníctvo");
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -20,21 +27,20 @@ export default function CardCreator({ onClose }: CardCreatorProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Nová karta:", { title, description, image });
-    onClose(); // zatiaľ len zavrie modal
+    onSave({ title, description, image, category }); // pridal Adam - na lokalny testing
   };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl shadow-xl w-full max-w-md relative">
         <h2 className="text-2xl font-semibold mb-4 text-center text-gray-900 dark:text-gray-100">
-          ✨ Vytvoriť novú kartu
+          Nový príspevok
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-gray-700 dark:text-gray-300 mb-1">
-              Názov práce
+              Názov
             </label>
             <input
               type="text"
@@ -57,6 +63,23 @@ export default function CardCreator({ onClose }: CardCreatorProps) {
               placeholder="Krátky popis práce..."
               rows={3}
             />
+          </div>
+
+          <div>
+            <label className="block text-gray-700 dark:text-gray-300 mb-1">
+              Typ príspevku
+            </label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full p-2 rounded-lg border dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500"
+            >
+              <option>Dobrovoľníctvo</option>
+              <option>Vzdelávanie</option>
+              <option>Pomoc seniorom</option>
+              <option>Spoločenská aktivita</option>
+              <option>Iné</option>
+            </select>
           </div>
 
           <div>
