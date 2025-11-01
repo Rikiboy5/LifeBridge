@@ -8,13 +8,19 @@ interface CardCreatorProps {
     image?: string | null;
     category: string;
   }) => void;
+  initialData?: {
+    title: string;
+    description: string;
+    image?: string;
+    category: string;
+  };
 }
 
-export default function CardCreator({ onClose, onSave }: CardCreatorProps) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [image, setImage] = useState<string | null>(null);
-  const [category, setCategory] = useState("Dobrovoľníctvo");
+export default function CardCreator({ onClose, onSave, initialData }: CardCreatorProps) {
+  const [title, setTitle] = useState(initialData?.title || "");
+  const [description, setDescription] = useState(initialData?.description || "");
+  const [image, setImage] = useState<string | null>(initialData?.image || null);
+  const [category, setCategory] = useState(initialData?.category || "Dobrovoľníctvo");
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
