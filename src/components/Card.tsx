@@ -5,7 +5,6 @@ interface CardProps {
   description: string;
   image?: string;
   author?: string;
-  location?: string;
   category?: string;
 }
 
@@ -14,7 +13,6 @@ export default function Card({
   description,
   image,
   author,
-  location,
   category,
 }: CardProps) {
   return (
@@ -48,11 +46,6 @@ export default function Card({
           {author && (
             <div className="flex items-center space-x-1">
               <span className="font-medium">{author}</span>
-            </div>
-          )}
-          {location && (
-            <div className="flex items-center space-x-1">
-              <span>📍 {location}</span>
             </div>
           )}
         </div>
