@@ -261,7 +261,75 @@ def get_users():
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT id_user, meno, priezvisko, mail, datum_narodenia, rola FROM users WHERE soft_del = 0 ORDER BY id_user DESC")
+
+        where = ["u.soft_del = 0"]
+        params = []
+
+        score_sql = "0"  # default (bez q)
+
+        if q:
+            # preferuj case/diakritiku-NEcitlivé kolácie v DB, napr. utf8mb4_0900_ai_ci
+            like_any = f"%{q}%"
+            like_prefix = f"{q}%"
+            like_fullname_prefix = f"{q}%"
+
+            where.append("(u.meno LIKE %s OR u.priezvisko LIKE %s OR u.mail LIKE %s OR CONCAT(u.meno,' ',u.priezvisko) LIKE %s)")
+            params += [like_any, like_any, like_any, like_any]
+
+            # jednoduché bodovanie relevancie
+            score_sql = """
+                (CASE WHEN CONCAT(u.meno,' ',u.priezvisko) = %s THEN 100 ELSE 0 END) +
+                (CASE WHEN CONCAT(u.meno,' ',u.priezvisko) LIKE %s THEN 60 ELSE 0 END) +
+                (CASE WHEN u.meno LIKE %s THEN 40 ELSE 0 END) +
+                (CASE WHEN u.priezvisko LIKE %s THEN 35 ELSE 0 END) +
+                (CASE WHEN u.mail LIKE %s THEN 20 ELSE 0 END) +
+                (CASE WHEN u.meno LIKE %s THEN 10 ELSE 0 END) +
+                (CASE WHEN u.priezvisko LIKE %s THEN 8 ELSE 0 END) +
+                (CASE WHEN u.mail LIKE %s THEN 5 ELSE 0 END)
+            """
+            # parametre pre score: exact, fullname prefix, prefixy a "contains"
+            score_params = [
+                q,
+                like_fullname_prefix,
+                like_prefix, like_prefix, like_prefix,  # prefer prefix na mene/priezvisku/maily
+                like_any, like_any, like_any           # a potom ľubovoľné umiestnenie
+            ]
+
+            # ak je q, defaultne triedime podľa relevancie (alebo keď si vyžiadaš ?sort=relevance)
+            if sort in ("relevance", "id_desc", "id_asc", "name_asc", "name_desc"):
+                sort_sql = f"score DESC, u.meno ASC, u.priezvisko ASC"
+
+        where_sql = " AND ".join(where)
+
+        # total
+        cur.execute(f"SELECT COUNT(*) AS total FROM users u WHERE {where_sql}", params)
+        total = cur.fetchone()["total"]
+
+        # data
+        if q:
+            cur.execute(
+                f"""
+                SELECT u.id_user, u.meno, u.priezvisko, u.mail,
+                       {score_sql} AS score
+                FROM users u
+                WHERE {where_sql}
+                ORDER BY {sort_sql}
+                LIMIT %s OFFSET %s
+                """,
+                params + score_params + [page_size, offset],
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT u.id_user, u.meno, u.priezvisko, u.mail
+                FROM users u
+                WHERE {where_sql}
+                ORDER BY {sort_sql}
+                LIMIT %s OFFSET %s
+                """,
+                params + [page_size, offset],
+            )
+
         rows = cur.fetchall()
 
         if not q:
