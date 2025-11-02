@@ -236,12 +236,114 @@ def login_user():
 # ==========================================
 @app.get("/api/users")
 def get_users():
+    q = request.args.get("q", "").strip()
+    sort = request.args.get("sort", "id_desc").lower()  # id_desc | id_asc | name_asc | name_desc | relevance
+
+    # stránkovanie
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = min(100, max(1, int(request.args.get("page_size", 50))))
+    except (TypeError, ValueError):
+        page_size = 50
+    offset = (page - 1) * page_size
+
+    # default sort (keď nie je q)
+    sort_sql = {
+        "id_desc": "u.id_user DESC",
+        "id_asc": "u.id_user ASC",
+        "name_asc": "u.meno ASC, u.priezvisko ASC",
+        "name_desc": "u.meno DESC, u.priezvisko DESC",
+    }.get(sort, "u.id_user DESC")
+
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT id_user, meno, priezvisko, mail, datum_narodenia, rola FROM users WHERE soft_del = 0 ORDER BY id_user DESC")
+
+        where = ["u.soft_del = 0"]
+        params = []
+
+        score_sql = "0"  # default (bez q)
+
+        if q:
+            # preferuj case/diakritiku-NEcitlivé kolácie v DB, napr. utf8mb4_0900_ai_ci
+            like_any = f"%{q}%"
+            like_prefix = f"{q}%"
+            like_fullname_prefix = f"{q}%"
+
+            where.append("(u.meno LIKE %s OR u.priezvisko LIKE %s OR u.mail LIKE %s OR CONCAT(u.meno,' ',u.priezvisko) LIKE %s)")
+            params += [like_any, like_any, like_any, like_any]
+
+            # jednoduché bodovanie relevancie
+            score_sql = """
+                (CASE WHEN CONCAT(u.meno,' ',u.priezvisko) = %s THEN 100 ELSE 0 END) +
+                (CASE WHEN CONCAT(u.meno,' ',u.priezvisko) LIKE %s THEN 60 ELSE 0 END) +
+                (CASE WHEN u.meno LIKE %s THEN 40 ELSE 0 END) +
+                (CASE WHEN u.priezvisko LIKE %s THEN 35 ELSE 0 END) +
+                (CASE WHEN u.mail LIKE %s THEN 20 ELSE 0 END) +
+                (CASE WHEN u.meno LIKE %s THEN 10 ELSE 0 END) +
+                (CASE WHEN u.priezvisko LIKE %s THEN 8 ELSE 0 END) +
+                (CASE WHEN u.mail LIKE %s THEN 5 ELSE 0 END)
+            """
+            # parametre pre score: exact, fullname prefix, prefixy a "contains"
+            score_params = [
+                q,
+                like_fullname_prefix,
+                like_prefix, like_prefix, like_prefix,  # prefer prefix na mene/priezvisku/maily
+                like_any, like_any, like_any           # a potom ľubovoľné umiestnenie
+            ]
+
+            # ak je q, defaultne triedime podľa relevancie (alebo keď si vyžiadaš ?sort=relevance)
+            if sort in ("relevance", "id_desc", "id_asc", "name_asc", "name_desc"):
+                sort_sql = f"score DESC, u.meno ASC, u.priezvisko ASC"
+
+        where_sql = " AND ".join(where)
+
+        # total
+        cur.execute(f"SELECT COUNT(*) AS total FROM users u WHERE {where_sql}", params)
+        total = cur.fetchone()["total"]
+
+        # data
+        if q:
+            cur.execute(
+                f"""
+                SELECT u.id_user, u.meno, u.priezvisko, u.mail,
+                       {score_sql} AS score
+                FROM users u
+                WHERE {where_sql}
+                ORDER BY {sort_sql}
+                LIMIT %s OFFSET %s
+                """,
+                params + score_params + [page_size, offset],
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT u.id_user, u.meno, u.priezvisko, u.mail
+                FROM users u
+                WHERE {where_sql}
+                ORDER BY {sort_sql}
+                LIMIT %s OFFSET %s
+                """,
+                params + [page_size, offset],
+            )
+
         rows = cur.fetchall()
-        return jsonify(rows), 200
+
+        if not q:
+            return jsonify(rows), 200
+
+        return jsonify({
+            "items": rows,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "pages": (total + page_size - 1) // page_size
+            }
+        }), 200
     finally:
         cur.close()
         conn.close()
@@ -252,18 +354,115 @@ def get_users():
 
 @app.get("/api/posts")
 def get_posts():
+    q = request.args.get("q", "").strip()
+    sort = request.args.get("sort", "id_desc").lower()  # id_desc | id_asc | title_asc | title_desc | relevance
+    category = request.args.get("category", "").strip()
+    author_id = request.args.get("author_id", "").strip()
+
+    # stránkovanie
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = min(100, max(1, int(request.args.get("page_size", 50))))
+    except (TypeError, ValueError):
+        page_size = 50
+    offset = (page - 1) * page_size
+
+    sort_sql = {
+        "id_desc": "p.id_post DESC",
+        "id_asc":  "p.id_post ASC",
+        "title_asc": "p.title ASC",
+        "title_desc": "p.title DESC",
+    }.get(sort, "p.id_post DESC")
+
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("""
-        SELECT p.id_post, p.title, p.description, p.image, p.category,
-            u.meno AS name, u.priezvisko AS surname
-        FROM posts p
-        JOIN users u ON u.id_user = p.user_id
-        ORDER BY p.id_post DESC
-        """)
-        posts = cur.fetchall()
-        return jsonify(posts), 200
+        where = ["1=1"]
+        params = []
+
+        if category:
+            where.append("p.category = %s")
+            params.append(category)
+        if author_id:
+            where.append("p.user_id = %s")
+            params.append(author_id)
+
+        score_sql = "0"
+        score_params = []
+        if q:
+            like_any = f"%{q}%"
+            like_prefix = f"{q}%"
+            fullname = "CONCAT(u.meno,' ',u.priezvisko)"
+            where.append(
+                "(p.title LIKE %s OR p.description LIKE %s OR p.category LIKE %s OR "
+                f"{fullname} LIKE %s)"
+            )
+            params += [like_any, like_any, like_any, like_any]
+            score_sql = f"""
+                (CASE WHEN p.title = %s THEN 120 ELSE 0 END) +
+                (CASE WHEN p.title LIKE %s THEN 80 ELSE 0 END) +
+                (CASE WHEN p.description LIKE %s THEN 40 ELSE 0 END) +
+                (CASE WHEN p.category LIKE %s THEN 30 ELSE 0 END) +
+                (CASE WHEN {fullname} LIKE %s THEN 25 ELSE 0 END) +
+                (CASE WHEN p.title LIKE %s THEN 10 ELSE 0 END) +
+                (CASE WHEN p.description LIKE %s THEN 6 ELSE 0 END)
+            """
+            score_params = [q, like_prefix, like_prefix, like_prefix, like_prefix, like_any, like_any]
+            sort_sql = "score DESC, p.title ASC, p.id_post DESC"
+
+        where_sql = " AND ".join(where)
+
+        # total
+        cur.execute(f"""
+            SELECT COUNT(*) AS total
+            FROM posts p
+            JOIN users u ON u.id_user = p.user_id
+            WHERE {where_sql}
+        """, params)
+        total = cur.fetchone()["total"]
+
+        # data
+        if q:
+            cur.execute(f"""
+                SELECT p.id_post, p.title, p.description, p.image, p.category,
+                       u.meno AS name, u.priezvisko AS surname,
+                       {score_sql} AS score
+                FROM posts p
+                JOIN users u ON u.id_user = p.user_id
+                WHERE {where_sql}
+                ORDER BY {sort_sql}
+                LIMIT %s OFFSET %s
+            """, params + score_params + [page_size, offset])
+        else:
+            cur.execute(f"""
+                SELECT p.id_post, p.title, p.description, p.image, p.category,
+                       u.meno AS name, u.priezvisko AS surname
+                FROM posts p
+                JOIN users u ON u.id_user = p.user_id
+                WHERE {where_sql}
+                ORDER BY {sort_sql}
+                LIMIT %s OFFSET %s
+            """, params + [page_size, offset])
+
+        rows = cur.fetchall()
+
+        if not q and not category and not author_id:
+            return jsonify(rows), 200
+
+        return jsonify({
+            "items": rows,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "pages": (total + page_size - 1) // page_size,
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"Chyba pri načítaní príspevkov: {str(e)}"}), 500
     finally:
         cur.close()
         conn.close()
@@ -274,64 +473,102 @@ def create_post():
     data = request.get_json(force=True)
     title = data.get("title")
     description = data.get("description")
-    image = data.get("image")
     category = data.get("category")
+    image = data.get("image")  # môže byť None/base64/url
     user_id = data.get("user_id")
 
     if not all([title, description, category, user_id]):
-        return jsonify({"error": "Všetky polia sú povinné."}), 400
+        return jsonify({"error": "Chýbajú povinné údaje (title, description, category, user_id)."}), 400
 
     conn = get_conn()
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO posts (title, description, image, category, user_id)
+            INSERT INTO posts (title, description, category, image, user_id)
             VALUES (%s, %s, %s, %s, %s)
-        """, (title, description, image, category, user_id))
+        """, (title, description, category, image, user_id))
+        new_id = cur.lastrowid
         conn.commit()
-        return jsonify({"success": True}), 201
+
+        # vráť čerstvo vytvorený záznam (tak ako ho očakáva frontend)
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT p.id_post, p.title, p.description, p.image, p.category,
+                   u.meno AS name, u.priezvisko AS surname
+            FROM posts p
+            JOIN users u ON u.id_user = p.user_id
+            WHERE p.id_post = %s
+        """, (new_id,))
+        row = cur.fetchone()
+        return jsonify(row), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"Chyba pri vytváraní príspevku: {str(e)}"}), 500
     finally:
         cur.close()
         conn.close()
 
 
-@app.put("/api/posts/<int:post_id>")
-def update_post(post_id):
+@app.put("/api/posts/<int:id_post>")
+def update_post(id_post):
     data = request.get_json(force=True)
     title = data.get("title")
     description = data.get("description")
-    image = data.get("image")
     category = data.get("category")
+    image = data.get("image")
 
-    if not all([title, description, category]):
-        return jsonify({"error": "Všetky polia sú povinné."}), 400
+    if not any([title, description, category, image is not None]):
+        return jsonify({"error": "Nie je čo aktualizovať."}), 400
 
     conn = get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("""
-            UPDATE posts 
-            SET title=%s, description=%s, image=%s, category=%s
-            WHERE id_post=%s
-        """, (title, description, image, category, post_id))
+        # poskladaj SET dynamicky, aby sme nemenili polia na None ak neprišli
+        sets = []
+        params = []
+        if title is not None:
+            sets.append("title = %s"); params.append(title)
+        if description is not None:
+            sets.append("description = %s"); params.append(description)
+        if category is not None:
+            sets.append("category = %s"); params.append(category)
+        if image is not None:
+            sets.append("image = %s"); params.append(image)
+
+        if not sets:
+            return jsonify({"error": "Nie je čo aktualizovať."}), 400
+
+        params.append(id_post)
+        cur.execute(f"UPDATE posts SET {', '.join(sets)} WHERE id_post = %s", tuple(params))
+        if cur.rowcount == 0:
+            return jsonify({"error": "Príspevok neexistuje."}), 404
         conn.commit()
         return jsonify({"success": True}), 200
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"Chyba pri aktualizácii príspevku: {str(e)}"}), 500
     finally:
         cur.close()
         conn.close()
 
 
-@app.delete("/api/posts/<int:post_id>")
-def delete_post(post_id):
+@app.delete("/api/posts/<int:id_post>")
+def delete_post(id_post):
     conn = get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("DELETE FROM posts WHERE id_post = %s", (post_id,))
+        cur.execute("DELETE FROM posts WHERE id_post = %s", (id_post,))
+        if cur.rowcount == 0:
+            return jsonify({"error": "Príspevok neexistuje."}), 404
         conn.commit()
         return jsonify({"success": True}), 200
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"Chyba pri mazaní príspevku: {str(e)}"}), 500
     finally:
         cur.close()
         conn.close()
+
 
 # ==========================================
 # 🚀 MAIN

@@ -67,6 +67,7 @@ export default function Navbar() {
             >
               Príspevky
             </Link>
+           
       </div>
 
       {user && (

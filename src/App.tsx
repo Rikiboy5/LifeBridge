@@ -6,6 +6,8 @@ import Register from "./pages/Register";
 import Login from "./pages/Login";
 import Posts from "./pages/Posts";
 
+
+
 export default function App() {
   return (
     <Router>
