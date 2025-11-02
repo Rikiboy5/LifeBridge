@@ -261,7 +261,7 @@ def get_users():
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM users ORDER BY id_user DESC")
+        cur.execute("SELECT id_user, meno, priezvisko, mail, datum_narodenia, rola FROM users WHERE soft_del = 0 ORDER BY id_user DESC")
         rows = cur.fetchall()
 
         if not q:
