@@ -1,9 +1,15 @@
 import React from "react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
+//import ChatbotWidget from "../components/chatbot";
+//import ChatbotWidget from "../components/Chatbot_voice";
+//import ChatbotWidget from "../components/Chatbot_voice2";
+//import ChatbotWidget from "../components/Chatbot_voice_accessible";
+import ChatbotWidget from "../components/Chatbot_voice2_merged_v9";
 
 interface MainLayoutProps {
   children: React.ReactNode;
+
 }
 
 export default function MainLayout({ children }: MainLayoutProps) {
@@ -12,6 +18,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
       <Navbar />
       <main className="flex-grow pt-20">{children}</main>
       <Footer />
+      <ChatbotWidget />
     </div>
   );
 }
