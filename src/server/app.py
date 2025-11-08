@@ -1,11 +1,12 @@
 # server/app.py
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 import mysql.connector.pooling
 import os
 import re
 from datetime import datetime
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -13,9 +14,9 @@ bcrypt = Bcrypt(app)
 
 # 🔧 DB konfigurácia
 DB_HOST = os.getenv("DB_HOST", "sql7.freesqldatabase.com")
-DB_USER = os.getenv("DB_USER", "sql7804820")
-DB_PASS = os.getenv("DB_PASS", "mZhcUrwhAS")
-DB_NAME = os.getenv("DB_NAME", "sql7804820")
+DB_USER = os.getenv("DB_USER", "sql7806067")
+DB_PASS = os.getenv("DB_PASS", "Y8yg3HRkEb")
+DB_NAME = os.getenv("DB_NAME", "sql7806067")
 DB_PORT = int(os.getenv("DB_PORT", "3306"))
 
 # 🧩 Connection pool
@@ -33,6 +34,23 @@ pool = mysql.connector.pooling.MySQLConnectionPool(
 
 def get_conn():
     return pool.get_connection()
+
+# Filesystem storage for avatars (no DB)
+BASE_DIR = os.path.dirname(__file__)
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+AVATARS_DIR = os.path.join(UPLOAD_DIR, "avatars")
+os.makedirs(AVATARS_DIR, exist_ok=True)
+ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+
+def _avatar_path_for(user_id: int, ext: str):
+    return os.path.join(AVATARS_DIR, f"user_{user_id}{ext}")
+
+def _find_existing_avatar(user_id: int):
+    for ext in ALLOWED_IMAGE_EXTS:
+        path = _avatar_path_for(user_id, ext)
+        if os.path.exists(path):
+            return path, ext
+    return None, None
 
 # 🔒 Validácia hesla
 def validate_password(password):
@@ -569,6 +587,224 @@ def delete_post(id_post):
         cur.close()
         conn.close()
 
+# ==========================================
+# 👤 PROFIL – GET/UPDATE
+# ==========================================
+
+ALLOWED_PROFILE_FIELDS = {"meno", "priezvisko", "datum_narodenia", "mesto", "about"}
+
+def _validate_profile_payload(data: dict):
+    """Základná validácia pre update profilu."""
+    if not data or not any(k in data for k in ALLOWED_PROFILE_FIELDS):
+        return False, "Nie je čo aktualizovať."
+
+    # dĺžky a formáty
+    if "meno" in data and (not data["meno"] or len(data["meno"]) > 100):
+        return False, "Meno je povinné a môže mať max 100 znakov."
+    if "priezvisko" in data and (not data["priezvisko"] or len(data["priezvisko"]) > 100):
+        return False, "Priezvisko je povinné a môže mať max 100 znakov."
+    if "mesto" in data and (data["mesto"] is not None) and len(data["mesto"]) > 100:
+        return False, "Mesto môže mať max 100 znakov."
+    if "about" in data and (data["about"] is not None) and len(data["about"]) > 5000:
+        return False, "Text „O mne“ môže mať max 5000 znakov."
+    if "datum_narodenia" in data and data["datum_narodenia"]:
+        try:
+            # očakáva sa 'YYYY-MM-DD'
+            datetime.strptime(data["datum_narodenia"], "%Y-%m-%d")
+        except Exception:
+            return False, "Neplatný formát dátumu (použi YYYY-MM-DD)."
+
+    # nepovolené polia (napr. mail, heslo, rola) – ak by prišli, odmietneme
+    forbidden = set(data.keys()) - ALLOWED_PROFILE_FIELDS
+    if forbidden:
+        return False, f"Nasledujúce polia nie je možné meniť: {', '.join(sorted(forbidden))}"
+
+    return True, ""
+
+# Avatar (no DB) endpoints
+@app.post("/api/profile/<int:user_id>/avatar")
+def upload_profile_avatar(user_id: int):
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "Súbor nebol dodaný."}), 400
+
+    filename = secure_filename(file.filename)
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower()
+    if ext not in ALLOWED_IMAGE_EXTS:
+        return jsonify({"error": "Nepodporovaný formát. Povolené: jpg, jpeg, png, gif, webp"}), 400
+
+    # remove old avatar with different ext
+    for e in ALLOWED_IMAGE_EXTS:
+        old = _avatar_path_for(user_id, e)
+        try:
+            if os.path.exists(old):
+                os.remove(old)
+        except Exception:
+            pass
+
+    path = _avatar_path_for(user_id, ext)
+    try:
+        file.save(path)
+    except Exception as e:
+        return jsonify({"error": f"Ukladanie zlyhalo: {str(e)}"}), 500
+
+    url = f"/uploads/avatars/user_{user_id}{ext}"
+    return jsonify({"url": url}), 201
+
+
+@app.get("/api/profile/<int:user_id>/avatar")
+def get_profile_avatar_meta(user_id: int):
+    path, ext = _find_existing_avatar(user_id)
+    if not path:
+        return jsonify({"error": "Avatar nenájdený"}), 404
+    url = f"/uploads/avatars/user_{user_id}{ext}"
+    return jsonify({"url": url}), 200
+
+
+@app.get("/uploads/avatars/<path:filename>")
+def serve_avatar_file(filename: str):
+    return send_from_directory(AVATARS_DIR, filename, as_attachment=False)
+    
+
+@app.get("/api/profile/<int:user_id>")
+def get_profile(user_id: int):
+    """Načíta detaily profilu pre daného používateľa (bez hesla)."""
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT 
+                u.id_user, u.meno, u.priezvisko, u.mail, u.datum_narodenia,
+                u.mesto, u.about, u.rola, u.created_at
+            FROM users u
+            WHERE u.id_user = %s AND u.soft_del = 0
+        """, (user_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Používateľ neexistuje."}), 404
+        return jsonify(row), 200
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.put("/api/profile/<int:user_id>")
+def update_profile(user_id: int):
+    """
+    Aktualizuje profil prihláseného používateľa.
+    Meniteľné: meno, priezvisko, datum_narodenia, mesto, about
+    Nemeníme: mail, heslo, rola, soft_del, atď.
+    """
+    data = request.get_json(force=True) or {}
+    ok, msg = _validate_profile_payload(data)
+    if not ok:
+        return jsonify({"error": msg}), 400
+
+    # dynamický SET len pre povolené polia
+    sets = []
+    params = []
+    for field in ALLOWED_PROFILE_FIELDS:
+        if field in data:
+            sets.append(f"{field} = %s")
+            params.append(data[field])
+
+    if not sets:
+        return jsonify({"error": "Nie je čo aktualizovať."}), 400
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        params.append(user_id)
+        cur.execute(f"""
+            UPDATE users
+            SET {', '.join(sets)}
+            WHERE id_user = %s AND soft_del = 0
+        """, tuple(params))
+        if cur.rowcount == 0:
+            return jsonify({"error": "Používateľ neexistuje alebo je zmazaný."}), 404
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"Chyba pri ukladaní profilu: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+    # vráť čerstvo aktualizovaný profil
+    return get_profile(user_id)
+
+
+# ==========================================
+# 🧩 PROFIL – HOBBY GET/PUT
+# ==========================================
+
+@app.get("/api/profile/<int:user_id>/hobbies")
+def get_user_hobbies(user_id: int):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT h.id_hobby, h.nazov, h.id_kategoria, hk.nazov AS kategoria_nazov
+            FROM user_hobby uh
+            JOIN hobby h ON h.id_hobby = uh.id_hobby
+            LEFT JOIN hobby_kategoria hk ON hk.id_kategoria = h.id_kategoria
+            WHERE uh.id_user = %s
+            ORDER BY hk.nazov ASC, h.nazov ASC
+            """,
+            (user_id,),
+        )
+        items = cur.fetchall()
+        return jsonify(items), 200
+    except Exception as e:
+        return jsonify({"error": f"Chyba pri načítaní záľub: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.put("/api/profile/<int:user_id>/hobbies")
+def put_user_hobbies(user_id: int):
+    data = request.get_json(force=True) or {}
+    hobbies = data.get("hobbies")
+    if not isinstance(hobbies, list):
+        return jsonify({"error": "Pole 'hobbies' musí byť zoznam ID."}), 400
+
+    # odfiltruj duplicitné a non-int
+    try:
+        hobby_ids = sorted({int(hid) for hid in hobbies})
+    except Exception:
+        return jsonify({"error": "Neplatné ID v hobbies."}), 400
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        # voliteľne over, že hobby existujú
+        if hobby_ids:
+            cur.execute(
+                f"SELECT COUNT(*) FROM hobby WHERE id_hobby IN ({','.join(['%s']*len(hobby_ids))})",
+                tuple(hobby_ids),
+            )
+            count = cur.fetchone()[0]
+            if count != len(hobby_ids):
+                return jsonify({"error": "Niektoré hobby ID neexistujú."}), 400
+
+        # vymaž staré väzby a vlož nové (idempotentný replace)
+        cur.execute("DELETE FROM user_hobby WHERE id_user = %s", (user_id,))
+        if hobby_ids:
+            cur.executemany(
+                "INSERT INTO user_hobby (id_user, id_hobby) VALUES (%s, %s)",
+                [(user_id, hid) for hid in hobby_ids],
+            )
+        conn.commit()
+        return jsonify({"success": True, "count": len(hobby_ids)}), 200
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"Chyba pri ukladaní záľub: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
 
 # ==========================================
 # 🚀 MAIN
