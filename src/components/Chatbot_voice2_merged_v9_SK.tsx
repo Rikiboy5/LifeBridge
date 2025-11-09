@@ -1,15 +1,12 @@
-
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Send, MessageCircle, X, ChevronDown, Volume2, VolumeX } from "lucide-react";
 
 /**
- * LifeBridge – Chatbot v9 (tablet+mobile responsive, female SK voice)
- * - Stays docked bottom-right (no fullscreen).
- * - New responsive sizing for tablets and phones with explicit breakpoints.
- * - Force "reload" when navigating to the same route (navigate(0)).
- * - Stronger female selection for Slovak TTS (prefer Viktoria/Zuzana/Iveta/...; avoid male-like names).
- * - Optional manual override via localStorage: chatbot_voice_sk = exact voice name.
+ * LifeBridge – Chatbot v9 (SK-only)
+ * - Docked bottom-right, tablet+mobile responsive.
+ * - Slovak UI only (removed English and language switcher).
+ * - Female Slovak TTS preference with optional override via localStorage: chatbot_voice_sk.
  */
 
 // --------- Web Speech API typy (minimal) ---------
@@ -17,7 +14,7 @@ declare var webkitSpeechRecognition: {
   new (): any;
 };
 
-type Lang = "sk" | "en";
+type Lang = "sk"; // SK-only
 
 type RouteInfo = {
   path: string;
@@ -29,7 +26,6 @@ type RouteInfo = {
 type QA = {
   q: string[];
   a_sk: string;
-  a_en: string;
 };
 
 type Offer = {
@@ -42,108 +38,197 @@ type Offer = {
 
 type RecStatus = "idle" | "listening" | "done" | "error";
 
-// --------- i18n ---------
+// --------- Slovak strings ---------
 
 const STR = {
-  sk: {
-    assistant: "LifeBridge Asistent",
-    currentPage: "Aktuálna stránka",
-    hello: (name?: string) =>
-      `${name ? `Ahoj ${name}!` : "Ahoj!"} Som asistent LifeBridge. Spýtaj sa, kde nájdeš prihlásenie, registráciu, profil, ponuky alebo zoznam používateľov.`,
-    goTo: (label: string) => `Prejsť na ${label}`,
-    opening: (label: string, desc: string) => `Jasné! Otváram ${label} – ${desc}`,
-    fallback:
-      `Zatiaľ si s týmto dotazom neviem rady 🤔 Skús prosím spomenúť, či chceš prihlásenie, registráciu, profil, ponuky alebo používateľov.`,
-    inputPh: "Spýtaj sa: kde je prihlásenie…",
-    quick: { login: "Prihlásenie", register: "Registrácia", profile: "Profil", offers: "Ponuky", users: "Používatelia" },
-    ttsOn: "Čítanie zapnuté",
-    ttsOff: "Čítanie vypnuté",
-    speakBtn: "🎤 Hovoriť",
-    listening: "Počúvam...",
-    done: "Hotovo!",
-    error: "Chyba mikrofónu",
-    langLabel: "Jazyk",
-    foundOffer: (title: string, loc?: string) => `Našiel som ponuku: ${title}${loc ? ` v ${loc}` : ""}.`,
-    offersGo: "Prejsť na ponuky",
-    routes: { home: "Domov", login: "Prihlásenie", register: "Registrácia", profile: "Profil", users: "Používatelia" },
-  },
-  en: {
-    assistant: "LifeBridge Assistant",
-    currentPage: "Current page",
-    hello: (name?: string) =>
-      `${name ? `Hi ${name}!` : "Hi!"} I'm the LifeBridge assistant. Ask me where to find login, registration, profile, offers or the users list.`,
-    goTo: (label: string) => `Go to ${label}`,
-    opening: (label: string, desc: string) => `Sure! Opening ${label} – ${desc}`,
-    fallback:
-      `I'm not sure yet 🤔 Try mentioning login, registration, profile, offers or users.`,
-    inputPh: "Ask: where is login…",
-    quick: { login: "Login", register: "Registration", profile: "Profile", offers: "Offers", users: "Users" },
-    ttsOn: "Reading on",
-    ttsOff: "Reading off",
-    speakBtn: "🎤 Speak",
-    listening: "Listening...",
-    done: "Done!",
-    error: "Microphone error",
-    langLabel: "Language",
-    foundOffer: (title: string, loc?: string) => `I found an offer: ${title}${loc ? ` in ${loc}` : ""}.`,
-    offersGo: "Go to offers",
-    routes: { home: "Home", login: "Login", register: "Registration", profile: "Profile", users: "Users" },
-  },
+  assistant: "LifeBridge Asistent",
+  currentPage: "Aktuálna stránka",
+  hello: (name?: string) =>
+    `${name ? `Ahoj ${name}!` : "Ahoj!"} Som asistent LifeBridge. Spýtaj sa, kde nájdeš prihlásenie, registráciu, profil, ponuky alebo zoznam používateľov.`,
+  goTo: (label: string) => `Prejsť na ${label}`,
+  opening: (label: string, desc: string) => `Nech sa páči! Klikni na ${label} – ${desc}`,
+  fallback:
+    `Zatiaľ si s týmto dotazom neviem rady – skús, prosím, spomenúť, či chceš prihlásenie, registráciu, profil, ponuky alebo používateľov.`,
+  inputPh: "Spýtaj sa: kde je prihlásenie?|",
+  quick: { login: "Prihlásenie", register: "Registrácia", profile: "Profil", offers: "Ponuky", users: "Používatelia" },
+  ttsOn: "Čítanie zapnuté",
+  ttsOff: "Čítanie vypnuté",
+  speakBtn: "🎤 Hovoriť",
+  listening: "Počúvam...",
+  done: "Hotovo!",
+  error: "Chyba mikrofónu",
+  foundOffer: (title: string, loc?: string) => `Našiel som ponuku: ${title}${loc ? ` v ${loc}` : ""}.`,
+  offersGo: "Prejsť na ponuky",
+  routes: { home: "Domov", login: "Prihlásenie", register: "Registrácia", profile: "Profil", users: "Používatelia", posts: "Príspevky" },
 } as const;
 
 // --------- Helpers for routes & matching ---------
 
-function getLocalizedRouteLabel(path: string, lang: Lang): string {
-  const map: Record<string, { sk: string; en: string }> = {
-    "/": { sk: STR.sk.routes.home, en: STR.en.routes.home },
-    "/login": { sk: STR.sk.routes.login, en: STR.en.routes.login },
-    "/register": { sk: STR.sk.routes.register, en: STR.en.routes.register },
-    "/profile": { sk: STR.sk.routes.profile, en: STR.en.routes.profile },
-    "/users": { sk: STR.sk.routes.users, en: STR.en.routes.users },
+function getLocalizedRouteLabel(path: string): string {
+  const map: Record<string, string> = {
+    "/": STR.routes.home,
+    "/login": STR.routes.login,
+    "/register": STR.routes.register,
+    "/profile": STR.routes.profile,
+    "/users": STR.routes.users,
+    "/posts": STR.routes.posts,
   };
-  const rec = map[path];
-  if (rec) return lang === "en" ? rec.en : rec.sk;
-  return path;
+  return map[path] ?? path;
 }
 
 function routeFromText(text: string): string | null {
   const t = text.toLowerCase();
-  if (/\b(login|sign\s?in)\b/.test(t)) return "/login";
-  if (/\b(registration|register|sign\s?up)\b/.test(t)) return "/register";
-  if (/\b(profile|account)\b/.test(t)) return "/profile";
-  if (/\b(users?|user\slist)\b/.test(t)) return "/users";
-  if (/\b(home|domov|start|main)\b/.test(t)) return "/";
+  if (/\b(prihlas|login|sign\s?in)\b/.test(t)) return "/login";
+  if (/\b(registr|sign\s?up)\b/.test(t)) return "/register";
+  if (/\b(profil|account)\b/.test(t)) return "/profile";
+  if (/\b(pou[zž]ívatel|users?)\b/.test(t)) return "/users";
+  if (/(pr[íi]spevky|prispevky|posts?)\b/.test(t)) return "/posts";
+  if (/\b(domov|home|hlavn[áa])\b/.test(t)) return "/";
   return null;
 }
 
 const FALLBACK_ROUTES: RouteInfo[] = [
-  { path: "/", label: STR.sk.routes.home, short: ["domov","home","ponuky","offers"], description:"Prehľad ponúk používateľov (karty s titulkom, popisom, autorom, lokalitou a kategóriou)." },
-  { path: "/login", label: STR.sk.routes.login, short: ["login","prihlasenie","sign in","signin"], description:"Formulár na prihlásenie – email + heslo." },
-  { path: "/register", label: STR.sk.routes.register, short: ["register","registracia","sign up","signup","registration"], description:"Formulár na vytvorenie účtu – meno, priezvisko, email, heslo, dátum narodenia." },
-  { path: "/profile", label: STR.sk.routes.profile, short: ["profil","account","profile"], description:"Informácie o používateľovi + priestor na tvorbu vlastných ponúk (karty)." },
-  { path: "/users", label: STR.sk.routes.users, short: ["používatelia","users","users list"], description:"Zoznam používateľov načítaný z backendu /api/users." },
+  { path: "/", label: STR.routes.home, short: ["domov","home","ponuky","offers","hlavná stránka","hlavna stranka","úvod",
+    "uvod","kde nájdem ponuky","chcem vidieť ponuky","zobraziť ponuky","ukáž mi ponuky","aké ponuky sú dostupné","prehľad ponúk",
+    "ponuky používateľov","kde sú karty s ponukami","kde si môžem pozrieť ponuky","hlavné menu","späť na domov","návrat domov"
+  ], description: "Prehľad ponúk používateľov (karty s titulkom, popisom, autorom, lokalitou)." },
+  { path: "/login", label: STR.routes.login, short: [
+      "kde sa prihlasim","kde sa prihlásim","ako sa prihlasim","ako sa prihlásiť","prihlasenie","login","sign in",
+      "ako sa dostanem do svojho uctu","neviem sa prihlasit","neda sa prihlasit","chyba pri prihlaseni",
+      "nefunguje prihlasenie","nemozem sa prihlasit","kde najdem login","prihlasovacie okno","otvorit prihlasenie"
+    ], description: "Prihlásenie do účtu (meno/heslo)." },
+  { path: "/register", label: STR.routes.register, short: [
+      "kde sa zaregistrujem","ako sa zaregistrujem","kde najdem registraciu","registracia","registrácia",
+      "ako vytvorim ucet","ako vytvorím účet","vytvorit ucet","vytvoriť účet","chcem sa zaregistrovat","sign up",
+      "create account","new account","registrujem sa","registruj ma","registracia nefunguje","neviem sa zaregistrovat",
+      "neda sa registrovat","pomoc s registraciou","registrujem sa ale nejde","registrujem sa ale chyba","kde je registracne tlacidlo"
+    ], description: "Vytvorenie nového účtu." },
+  { path: "/profile", label: STR.routes.profile, short: ["profil","account","účet","kde nájdem svoj profil","ako sa dostanem na profil","kde mám svoj účet",
+    "chcem upraviť svoj profil","ako si zmením heslo","správa profilu","nastavenia účtu","zmeniť email","moje ponuky","otvor môj profil", "kde je moj profil","ako zmenim profil",
+    "upravit profil","edit profil","zmenit fotku","upravim si meno","ako zmenim fotku","ako si upravim udaje","zmenit bio","ako zmenit udaje v profile","upravit osobne udaje",
+    "nastavenia profilu","profilove nastavenia"
+  ], description: "Tvoj profil a správa vlastných ponúk."},
+  { path: "/users", label: STR.routes.users, short: ["používatelia","users","zoznam","pouzivatelia","kde nájdem používateľov","zoznam používateľov",
+    "ukáž mi všetkých používateľov","chcem vidieť ostatných","hľadám používateľa","kto je prihlásený","vyhľadať používateľa","profily ostatných","kde sú ostatní používatelia"], description: "Zoznam používateľov." },
+  { path: "/posts", label: STR.routes.posts, short: ["príspevky","prispevky","posts","kde nájdem príspevky","zoznam príspevkov","moje príspevky","nové príspevky","ako pridám príspevok",
+    "chcem napísať príspevok","ako zmažem príspevok","ukáž mi príspevky","zobraziť príspevky","kde sú články"
+  ], description: "Zoznam príspevkov." },
 ];
 
+// --- Rozšírená banka otázok pre slovenského chatbota ---
 const FALLBACK_FAQ: QA[] = [
-  { q: ["kde sa prihlásim","ako sa prihlásiť","kde je login","login","prihlasenie","sign in","where is login"],
-    a_sk: "Na prihlásenie choď na stránku Prihlásenie. Klikni na tlačidlo nižšie alebo použi horné menu.",
-    a_en: "Go to the Login page. Use the button below or the top navigation." },
-  { q: ["kde sa zaregistrujem","ako si vytvorím účet","registrácia","sign up","registration","create account"],
-    a_sk: "Účet si vytvoríš na stránke Registrácia. Vyplň všetky polia a odošli formulár.",
-    a_en: "Create your account on the Registration page. Fill in all fields and submit the form." },
-  { q: ["kde nájdem ponuky","karty","domov","home","čo je na úvodnej","offers","list of offers"],
-    a_sk: "Ponuky zobrazujeme na domovskej stránke. Nájdeš tam karty s titulkom, popisom a autorom.",
-    a_en: "Offers are shown on the Home page as cards with title, description and author." },
-  { q: ["kde je môj profil","profil","account","účet","where is my profile","profile"],
-    a_sk: "Tvoj profil je na stránke Profil. Odtiaľ vieš tvoriť vlastné ponuky.",
-    a_en: "Your profile is on the Profile page. From there you can create your own offers." },
-  { q: ["kde vidím všetkých používateľov","users","zoznam účtov","list of users","all users"],
-    a_sk: "Zoznam používateľov je na stránke Používatelia (dáta z /api/users).",
-    a_en: "The users list is on the Users page (data from /api/users)." },
+  // REGISTRÁCIA
+ /* { 
+    q: [
+      "kde sa zaregistrujem","ako sa zaregistrujem","kde najdem registraciu","registracia","registrácia",
+      "ako vytvorim ucet","ako vytvorím účet","vytvorit ucet","vytvoriť účet","chcem sa zaregistrovat","sign up",
+      "create account","new account","registrujem sa","registruj ma","registracia nefunguje","neviem sa zaregistrovat",
+      "neda sa registrovat","pomoc s registraciou","registrujem sa ale nejde","registrujem sa ale chyba","kde je registracne tlacidlo"
+    ],
+    a_sk: "Účet si vytvoríš cez stránku Registrácia. Nájdeš ju v hornom menu alebo na úvodnej stránke. Vyplň meno, e-mail a heslo a potvrď registráciu.",
+  },
+
+  // PRIHLÁSENIE
+  {
+    q: [
+      "kde sa prihlasim","kde sa prihlásim","ako sa prihlasim","ako sa prihlásiť","prihlasenie","login","sign in",
+      "ako sa dostanem do svojho uctu","neviem sa prihlasit","neda sa prihlasit","chyba pri prihlaseni",
+      "nefunguje prihlasenie","nemozem sa prihlasit","kde najdem login","prihlasovacie okno","otvorit prihlasenie"
+    ],
+    a_sk: "Prihlásiť sa môžeš cez stránku Prihlásenie. Zadaj svoj e-mail a heslo. Ak si zabudol heslo, klikni na 'Zabudli ste heslo?'.",
+  },*/
+
+  // ZABUDNUTÉ HESLO
+  {
+    q: [
+      "zabudol som heslo","zabudla som heslo","ako obnovim heslo","reset hesla","reset password","obnova hesla",
+      "zle heslo","neviem heslo","chcem zmenit heslo","ako zmenim heslo","nepamätám si heslo","zle prihlasovacie udaje",
+      "stratené heslo","obnovit ucet","obnoviť účet","reštart hesla"
+    ],
+    a_sk: "Klikni na 'Zabudli ste heslo?' na stránke Prihlásenie. Zadaj svoj e-mail a pošleme ti link na obnovu hesla.",
+  },
+
+  // PROFIL
+  /*{
+    q: [
+      "kde je moj profil","profil","ako zmenim profil","upravit profil","edit profil","zmenit fotku","upravim si meno",
+      "ako zmenim fotku","ako si upravim udaje","zmenit bio","ako zmenit udaje v profile","upravit osobne udaje",
+      "nastavenia profilu","profilove nastavenia"
+    ],
+    a_sk: "Profil nájdeš po prihlásení vpravo hore. Tam môžeš meniť meno, fotku, popis aj nastavenia.",
+  },*/
+
+  // ODHLÁSENIE
+  {
+    q: [
+      "ako sa odhlasim","odhlasit sa","logout","sign out","odhlásenie","kde sa odhlasim","chcem sa odhlasit","ukoncit prihlasenie"
+    ],
+    a_sk: "Klikni na svoj profil vpravo hore a zvoľ 'Odhlásiť sa'.",
+  },
+
+  // PONUKY
+  {
+    q: [
+      "ako pridam ponuku","ako vytvorim ponuku","vytvorit ponuku","pridať ponuku","add offer","create offer",
+      "kde sa pridava ponuka","nahrat ponuku","zverejnit ponuku","upload ponuka","chcem pridat ponuku"
+    ],
+    a_sk: "Ponuku vytvoríš v sekcii Ponuky alebo cez Profil → Moje ponuky → Nová ponuka. Vyplň názov, popis a kategóriu.",
+  },
+
+  // HĽADANIE / FILTROVANIE
+  /*{
+    q: [
+      "ako najdem ponuky","hladat ponuky","ako hladat","kde su ponuky","ponuky","zobrazit ponuky",
+      "ako filtrovat","filter ponuky","ako vyhladat","hladanie","search offers","find offers","offers near me","ponuky v mojom meste"
+    ],
+    a_sk: "Ponuky nájdeš v sekcii Ponuky. Použi vyhľadávanie alebo filtre podľa kategórie, lokality či kľúčového slova.",
+  },*/
+
+  // PODPORA
+  {
+    q: [
+      "kontakt","kontaktujte nas","napisat podporu","support","help","potrebujem pomoc","problem","chyba",
+      "kde napisem spravu","kde je kontakt","ako kontaktovat","napisat email","kontaktna stranka","napisat spravu"
+    ],
+    a_sk: "Ak potrebuješ pomoc, napíš nám cez stránku Kontakt. Odpovieme ti čo najskôr.",
+  },
+
+  // PODMIENKY / GDPR
+  {
+    q: [
+      "gdpr","ochrana osobnych udajov","privacy policy","suhlas so spracovanim udajov","osobne udaje",
+      "obchodne podmienky","terms and conditions","podmienky pouzivania","policy"
+    ],
+    a_sk: "Ochranu osobných údajov a obchodné podmienky nájdeš v pätičke webu – odkazy 'Podmienky' a 'Ochrana údajov'.",
+  },
+
+  // TECHNICKÉ
+  {
+    q: [
+      "nefunguje stranka","stranka padla","neotvori sa","error","bug","neide","stranka nejde","system error",
+      "problem s webom","zlyha stranka","white screen","chyba v aplikacii"
+    ],
+    a_sk: "Ospravedlňujeme sa za nepríjemnosti. Skús obnoviť stránku (Ctrl+R). Ak problém pretrváva, kontaktuj podporu.",
+  },
+
+  // INÉ / VŠEOBECNÉ
+  {
+    q: [
+      "ako to funguje","co to je","o com je tato stranka","co mozem robit","pomoc","navod","instrukcie","ako pouzivat",
+      "prvykrat tu som","ako zacat","co mam robit","ako funguje aplikacia"
+    ],
+    a_sk: "Táto platforma spája používateľov pre dobrovoľníctvo a výmenu skúseností. Napíš, čo chceš urobiť (napr. 'zaregistrovať sa', 'pridať ponuku') a ja ti poradím krok po kroku.",
+  },
 ];
 
 function norm(s: string) {
-  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 function score(h: string, needles: string[]) {
   const hay = norm(h);
@@ -181,18 +266,18 @@ function bestOfferFor(text: string, offers: Offer[]): Offer | null {
   return best && best.s > 0 ? best.o : null;
 }
 
-// --------- Speech helpers ---------
+// --------- Speech helpers (SK) ---------
 
 const hasRecognition = (): boolean => {
   const w: any = window as any;
   return !!(w.SpeechRecognition || w.webkitSpeechRecognition);
 };
-const getRecognition = (lang: Lang): any | null => {
+const getRecognition = (): any | null => {
   const w: any = window as any;
   const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
   if (!SR) return null;
   const rec: any = new SR();
-  rec.lang = lang === "en" ? "en-US" : "sk-SK";
+  rec.lang = "sk-SK";
   rec.interimResults = false;
   rec.maxAlternatives = 1;
   return rec;
@@ -204,61 +289,54 @@ function refreshVoices() {
   try { cachedVoices = window.speechSynthesis ? window.speechSynthesis.getVoices() : []; }
   catch { cachedVoices = []; }
 }
-function pickVoiceFor(lang: Lang): SpeechSynthesisVoice | null {
+function pickVoiceSK(): SpeechSynthesisVoice | null {
   if (!("speechSynthesis" in window)) return null;
   if (!cachedVoices.length) refreshVoices();
 
   // Manual override (exact voice name)
   try {
-    const override = localStorage.getItem(lang === "sk" ? "chatbot_voice_sk" : "chatbot_voice_en");
+    const override = localStorage.getItem("chatbot_voice_sk");
     if (override) {
       const v = cachedVoices.find(v => v.name === override);
       if (v) return v;
     }
   } catch {}
 
-  const target = lang === "en" ? "en" : "sk";
-  const femaleHints = ["female","žena","zena","woman","f"];
-  const skFemaleNames = ["Viktoria","Viktória","Zuzana","Iveta","Jana","Lucia","Laura","Katarina","Karolina","Maria","Mária","Eva"];
-  const preferEN = ["Google US English", "Google UK English Female", "Samantha", "Microsoft Aria"];
-  const preferSK = ["Google slovenský","Google Slovak","Microsoft Viktoria","Viktoria","Zuzana","Iveta","Jana","Lucia"];
+  const candidates = cachedVoices.filter(v => v.lang && v.lang.toLowerCase().startsWith("sk"));
+  const preferSK = ["Google slovensk", "Google Slovak", "Microsoft Viktoria", "Viktoria", "Zuzana", "Iveta", "Jana", "Lucia"];
 
-  const candidates = cachedVoices.filter(v => v.lang && v.lang.toLowerCase().startsWith(target));
-
-  // 1) Strict preferred list
-  const prefList = lang === "en" ? preferEN : preferSK;
-  for (const name of prefList) {
+  for (const name of preferSK) {
     const v = candidates.find(vo => vo.name.toLowerCase().includes(name.toLowerCase()));
     if (v) return v;
   }
 
-  // 2) Heuristic female scoring
+  // Heuristic female scoring
+  const skFemaleNames = ["Viktoria","Viktória","Zuzana","Iveta","Jana","Lucia","Laura","Katarina","Karolina","Mária","Eva"];
+  const femaleHints = ["female","žena","zena","woman","f"];
   let best: { v: SpeechSynthesisVoice; s: number } | null = null;
   for (const v of candidates) {
     let s = 0;
     const nm = v.name.toLowerCase();
     if (femaleHints.some(f => nm.includes(f))) s += 3;
-    if (lang === "sk" && skFemaleNames.some(n => nm.includes(n.toLowerCase()))) s += 2;
+    if (skFemaleNames.some(n => nm.includes(n.toLowerCase()))) s += 2;
     if (/google|natural|neural/.test(nm)) s += 1;
-    // penalize obvious male names for SK
-    if (lang === "sk" && /(peter|jozef|boris|adam|juraj|matej|lukas|martin)/i.test(v.name)) s -= 3;
+    if (/(peter|jozef|boris|adam|juraj|matej|lukas|martin)/i.test(v.name)) s -= 3;
     if (!best || s > best.s) best = { v, s };
   }
   if (best && best.s > 0) return best.v;
 
-  // 3) Fallback: any candidate
   return candidates[0] || null;
 }
 
-const speak = (text: string, lang: Lang) => {
+const speak = (text: string) => {
   if (!("speechSynthesis" in window)) return;
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = lang === "en" ? "en-US" : "sk-SK";
-  const voice = pickVoiceFor(lang);
+  u.lang = "sk-SK";
+  const voice = pickVoiceSK();
   if (voice) u.voice = voice;
   // calmer tone
-  u.rate = lang === "en" ? 0.98 : 0.92;
-  u.pitch = lang === "en" ? 1.0 : 1.02;
+  u.rate = 0.92;
+  u.pitch = 1.02;
   try { window.speechSynthesis.cancel(); } catch {}
   window.speechSynthesis.speak(u);
 };
@@ -286,7 +364,7 @@ function Bubble({ from, children }: { from: "bot" | "me"; children: React.ReactN
 
 // --------- Component ---------
 
-export default function ChatbotWidget() {
+export default function ChatbotWidgetSKv9() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<React.ReactNode[]>([]);
@@ -294,10 +372,7 @@ export default function ChatbotWidget() {
   const [faq, setFaq] = useState<QA[]>(FALLBACK_FAQ);
   const [offers, setOffers] = useState<Offer[]>([]);
 
-  const [lang, setLang] = useState<Lang>(() => {
-    try { const saved = localStorage.getItem("chatbot_lang"); return (saved === "en" || saved === "sk") ? (saved as Lang) : "sk"; }
-    catch { return "sk"; }
-  });
+  const lang: Lang = "sk";
 
   const [tts, setTts] = useState<boolean>(() => {
     try { const saved = localStorage.getItem("chatbot_tts"); return saved === "off" ? false : true; }
@@ -309,6 +384,10 @@ export default function ChatbotWidget() {
   const [recStatus, setRecStatus] = useState<RecStatus>("idle");
   const [greetSpoken, setGreetSpoken] = useState<boolean>(false);
   const [dims, setDims] = useState<{w:number; h:number}>({ w: 390, h: 620 });
+  // Registration voice helper state
+  const [regHelperOffered, setRegHelperOffered] = useState<boolean>(false);
+  const [regActive, setRegActive] = useState<boolean>(false);
+  const [regPhase, setRegPhase] = useState<"idle"|"step1"|"step2">("idle");
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -321,7 +400,6 @@ export default function ChatbotWidget() {
     try { localStorage.setItem("chatbot_tts", tts ? "on" : "off"); } catch {}
     if (!tts) { try { window.speechSynthesis?.cancel(); } catch {} }
   }, [tts]);
-  useEffect(() => { try { localStorage.setItem("chatbot_lang", lang); } catch {} }, [lang]);
   useEffect(() => { if (!tts) { try { window.speechSynthesis?.cancel(); } catch {} } }, [location.pathname, tts]);
 
   // Dynamic data
@@ -352,12 +430,12 @@ export default function ChatbotWidget() {
   useEffect(() => { if (messages.length === 0) rebuildHelloBubble(); }, []);
   useEffect(() => {
     if (open && !greetSpoken && tts) {
-      const hello = STR[lang].hello(userName || undefined);
-      try { speak(hello, lang); } catch {}
+      const hello = STR.hello(userName || undefined);
+      try { speak(hello); } catch {}
       setGreetSpoken(true);
     }
   }, [open]);
-  useEffect(() => { if (messages.length) rebuildHelloBubble(messages.slice(1)); }, [lang, routes]);
+  useEffect(() => { if (messages.length) rebuildHelloBubble(messages.slice(1)); }, [routes]);
   useEffect(() => { if (open) listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" }); }, [messages, open]);
 
   // --- RESPONSIVE (tablet & down; docked) ---
@@ -367,12 +445,12 @@ export default function ChatbotWidget() {
       const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
 
       let w: number;
-      if (vw < 380) w = Math.floor(vw * 0.96);           // very small phones
-      else if (vw < 480) w = Math.floor(vw * 0.92);      // small phones
-      else if (vw < 600) w = Math.floor(vw * 0.86);      // large phones
-      else if (vw < 900) w = Math.floor(vw * 0.55);      // small tablets portrait
-      else if (vw < 1200) w = Math.floor(vw * 0.42);     // tablets landscape / small laptops
-      else w = 430;                                      // desktops
+      if (vw < 380) w = Math.floor(vw * 0.96);
+      else if (vw < 480) w = Math.floor(vw * 0.92);
+      else if (vw < 600) w = Math.floor(vw * 0.86);
+      else if (vw < 900) w = Math.floor(vw * 0.55);
+      else if (vw < 1200) w = Math.floor(vw * 0.42);
+      else w = 430;
 
       w = Math.min(w, 480);
       w = Math.max(w, 320);
@@ -392,7 +470,7 @@ export default function ChatbotWidget() {
   }, []);
 
   function localizedLabelForRoute(r: RouteInfo): string {
-    const localized = getLocalizedRouteLabel(r.path, lang);
+    const localized = getLocalizedRouteLabel(r.path);
     return localized || r.label;
   }
 
@@ -405,7 +483,7 @@ export default function ChatbotWidget() {
   }
 
   function rebuildHelloBubble(rest: React.ReactNode[] = []) {
-    const hello = STR[lang].hello(userName || undefined);
+    const hello = STR.hello(userName || undefined);
     const helloBubble = (
       <Bubble from="bot" key="hello">
         <div className="space-y-2">
@@ -427,11 +505,12 @@ export default function ChatbotWidget() {
     setMessages([helloBubble, ...rest]);
   }
 
-  function say(text: string) { if (tts) speak(text, lang); }
+  function say(text: string) { if (tts) speak(text); }
 
   function handleNavigate(r: RouteInfo) {
     const label = localizedLabelForRoute(r);
-    const text = STR[lang].opening(label, r.description);
+    const text = STR.opening(label, r.description);
+    try { if (r.path === "/register") sessionStorage.setItem("chatbot_nav_to_register", "1"); } catch {}
     setMessages((prev) => [
       ...prev,
       <Bubble from="bot" key={`nav-${r.path}-${Date.now()}`}>
@@ -441,7 +520,7 @@ export default function ChatbotWidget() {
             onClick={() => forceNavigate(r.path)}
             className="mt-1 inline-flex items-center gap-1 text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded-md"
           >
-            {STR[lang].goTo(label)}
+            {STR.goTo(label)}
           </button>
         </div>
       </Bubble>,
@@ -459,7 +538,7 @@ export default function ChatbotWidget() {
     const offer = offers.length ? bestOfferFor(text, offers) : null;
 
     if (qa) {
-      const answer = lang === "en" ? qa.a_en : qa.a_sk;
+      const answer = qa.a_sk;
       const suggested = route ?? routes[0];
       const sugLabel = suggested ? localizedLabelForRoute(suggested) : "";
       setMessages((prev) => [
@@ -472,7 +551,7 @@ export default function ChatbotWidget() {
                 onClick={() => forceNavigate(suggested.path)}
                 className="inline-flex items-center gap-1 text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded-md"
               >
-                {STR[lang].goTo(sugLabel)}
+                {STR.goTo(sugLabel)}
               </button>
             )}
           </div>
@@ -483,7 +562,7 @@ export default function ChatbotWidget() {
     }
 
     if (offer) {
-      const textOffer = STR[lang].foundOffer(offer.title, offer.location);
+      const textOffer = STR.foundOffer(offer.title, offer.location);
       setMessages((prev) => [
         ...prev,
         <Bubble from="bot" key={`offer-${Date.now()}`}>
@@ -493,7 +572,7 @@ export default function ChatbotWidget() {
               onClick={() => forceNavigate("/")}
               className="mt-1 inline-flex items-center gap-1 text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded-md"
             >
-              {STR[lang].offersGo}
+              {STR.offersGo}
             </button>
           </div>
         </Bubble>,
@@ -504,7 +583,7 @@ export default function ChatbotWidget() {
 
     if (route) { handleNavigate(route); return; }
 
-    const fb = STR[lang].fallback;
+    const fb = STR.fallback;
     setMessages((prev) => [
       ...prev,
       <Bubble from="bot" key={`fallback-${Date.now()}`}>
@@ -544,7 +623,7 @@ export default function ChatbotWidget() {
       return;
     }
     try { window.speechSynthesis?.cancel(); } catch {}
-    const rec = getRecognition(lang);
+    const rec = getRecognition();
     if (!rec) return;
     (window as any)._rec = rec;
     try {
@@ -595,7 +674,7 @@ export default function ChatbotWidget() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          aria-label="Open chat"
+          aria-label="Otvoriť chat"
           className="rounded-full shadow-lg p-4 bg-blue-600 text-white hover:bg-blue-700"
         >
           <MessageCircle className="w-6 h-6" />
@@ -607,18 +686,7 @@ export default function ChatbotWidget() {
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-blue-600 text-white">
             <div className="flex items-center gap-2">
-              <div className="font-semibold text-sm sm:text-base">{STR[lang].assistant}</div>
-              <label className="ml-2 text-xs opacity-90" htmlFor="lang-select">{STR[lang].langLabel}</label>
-              <select
-                id="lang-select"
-                value={lang}
-                onChange={(e) => setLang(e.target.value as Lang)}
-                className="ml-1 text-xs bg-white text-blue-900 font-semibold border border-white rounded px-2 py-1 shadow-sm focus:outline-none focus:ring-2 focus:ring-white/70"
-                aria-label={STR[lang].langLabel}
-              >
-                <option value="sk">SK</option>
-                <option value="en">EN</option>
-              </select>
+              <div className="font-semibold text-sm sm:text-base">{STR.assistant}</div>
             </div>
             <div className="flex items-center gap-2">
               {/* TTS toggle */}
@@ -631,12 +699,12 @@ export default function ChatbotWidget() {
                   });
                 }}
                 className={`p-2 sm:p-1 rounded ${tts ? "bg-white/15 hover:bg-white/25" : "bg-white/20 hover:bg-white/30"} `}
-                title={tts ? STR[lang].ttsOff : STR[lang].ttsOn}
-                aria-label="Toggle reading"
+                title={tts ? STR.ttsOff : STR.ttsOn}
+                aria-label="Prepnúť čítanie"
               >
                 {tts ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
               </button>
-              <button onClick={() => setOpen(false)} aria-label="Close chat" className="p-2 sm:p-1 rounded hover:bg-white/20">
+              <button onClick={() => { try { window.speechSynthesis?.cancel(); } catch {}; setOpen(false); }} aria-label="Zavrieť chat" className="p-2 sm:p-1 rounded hover:bg-white/20">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -645,7 +713,7 @@ export default function ChatbotWidget() {
           {/* Body */}
           <div ref={listRef} className="flex-1 p-3 space-y-3 overflow-y-auto bg-gradient-to-b from-gray-50 to-white dark:from-gray-800 dark:to-gray-900">
             <div className="text-[11px] text-gray-500 dark:text-gray-400 px-1">
-              {STR[lang].currentPage}: {location.pathname}
+              {STR.currentPage}: {location.pathname}
             </div>
             {messages}
           </div>
@@ -653,11 +721,12 @@ export default function ChatbotWidget() {
           {/* Quick actions */}
           <div className="px-3 pb-2 pt-1 border-t border-gray-200 dark:border-gray-800 bg-white/60 dark:bg-gray-900/60">
             <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
-              <QuickAction label={STR[lang].quick.login} onClick={() => reply(lang === "en" ? "login" : "prihlásenie")} />
-              <QuickAction label={STR[lang].quick.register} onClick={() => reply(lang === "en" ? "registration" : "registrácia")} />
-              <QuickAction label={STR[lang].quick.profile} onClick={() => reply(lang === "en" ? "profile" : "profil")} />
-              <QuickAction label={STR[lang].quick.offers} onClick={() => reply(lang === "en" ? "offers" : "ponuky")} />
-              <QuickAction label={STR[lang].quick.users} onClick={() => reply(lang === "en" ? "users" : "používatelia")} />
+              <QuickAction label={STR.quick.login} onClick={() => reply("prihlásenie")} />
+              <QuickAction label={STR.quick.register} onClick={() => reply("registrácia")} />
+              <QuickAction label={STR.quick.profile} onClick={() => reply("profil")} />
+              <QuickAction label={STR.quick.offers} onClick={() => reply("ponuky")} />
+              <QuickAction label={STR.quick.users} onClick={() => reply("používatelia")} />
+              <QuickAction label={STR.routes.posts} onClick={() => reply("príspevky")} />
             </div>
           </div>
 
@@ -666,10 +735,10 @@ export default function ChatbotWidget() {
             recSupported={recSupported}
             listening={listening}
             recStatus={recStatus}
-            speakLabel={STR[lang].speakBtn}
-            listeningLabel={STR[lang].listening}
-            doneLabel={STR[lang].done}
-            errorLabel={STR[lang].error}
+            speakLabel={STR.speakBtn}
+            listeningLabel={STR.listening}
+            doneLabel={STR.done}
+            errorLabel={STR.error}
             toggleMic={toggleMic}
           />
 
@@ -680,7 +749,7 @@ export default function ChatbotWidget() {
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder={STR[lang].inputPh}
+                  placeholder={STR.inputPh}
                   className="w-full rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-3 sm:py-2 pr-9 focus:outline-none focus:ring-2 focus:ring-blue-400"
                 />
                 <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -730,7 +799,7 @@ function VoiceControls(props: {
           aria-pressed={listening}
           aria-label={speakLabel}
         >
-          {speakLabel} {listening ? "⏺" : ""}
+          {speakLabel} {listening ? "…" : ""}
         </button>
 
         <div role="status" aria-live="polite"
