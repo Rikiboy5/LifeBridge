@@ -1,3 +1,5 @@
+
+
 # server/app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -567,6 +569,138 @@ def delete_post(id_post):
         return jsonify({"error": f"Chyba pri mazaní príspevku: {str(e)}"}), 500
     finally:
         cur.close()
+        conn.close()
+
+# ------------------------------------------
+# Nové endpointy pre activities
+# ------------------------------------------
+
+@app.get("/api/activities")
+def list_activities():
+    page_size = int(request.args.get("page_size", 20))
+    page = int(request.args.get("page", 1))
+    q = request.args.get("q", "").strip()
+    offset = (page - 1) * page_size
+
+    sql = """
+      SELECT id_activity, title, description, image_url, capacity, attendees_count, lat, lng, user_id, created_at
+      FROM activities
+    """
+    params = []
+    if q:
+      sql += " WHERE title LIKE %s OR description LIKE %s"
+      like = f"%{q}%"
+      params.extend([like, like])
+    sql_count = "SELECT COUNT(*) AS total FROM (" + sql + ") t"
+    sql += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+    params.extend([page_size, offset])
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(sql_count, params[:-2] if q else [])
+        total = cur.fetchone()["total"]
+        cur.execute(sql, params)
+        items = cur.fetchall()
+        return jsonify({"items": items, "pagination": {
+            "page": page, "page_size": page_size,
+            "total": total, "pages": (total + page_size - 1)//page_size
+        }})
+    finally:
+        conn.close()
+
+
+@app.post("/api/activities")
+def create_activity():
+    data = request.get_json()
+    title = data.get("title")
+    description = data.get("description")
+    image_url = data.get("image_url")
+    capacity = data.get("capacity")
+    lat = data.get("lat")
+    lng = data.get("lng")
+    user_id = data.get("user_id")
+
+    if not title or len(title.strip()) == 0:
+        return jsonify({"error": "Názov je povinný."}), 400
+    if not isinstance(capacity, int) or capacity < 1:
+        return jsonify({"error": "Neplatná kapacita."}), 400
+    if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+        return jsonify({"error": "Neplatné súradnice."}), 400
+    if not user_id:
+        return jsonify({"error": "Nepodarilo sa identifikovať používateľa."}), 400
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO activities (title, description, image_url, capacity, lat, lng, user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (title, description, image_url, capacity, lat, lng, user_id))
+        activity_id = cur.lastrowid
+        conn.commit()
+        cur.execute("SELECT * FROM activities WHERE id_activity = %s", (activity_id,))
+        row = cur.fetchone()
+        keys = [desc[0] for desc in cur.description]
+        activity = dict(zip(keys, row))
+        return jsonify(activity)
+    finally:
+        conn.close()
+
+
+@app.post("/api/activities/<int:activity_id>/signup")
+def signup_activity(activity_id):
+    data = request.get_json()
+    user_id = data.get("user_id")
+
+    if not user_id:
+        return jsonify({"error": "Nepodarilo sa identifikovať používateľa."}), 400
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        # Over kapacitu
+        cur.execute("SELECT capacity, attendees_count FROM activities WHERE id_activity = %s FOR UPDATE", (activity_id,))
+        row = cur.fetchone()
+        if row is None:
+            return jsonify({"error": "Aktivita neexistuje."}), 404
+        capacity, attendees_count = row
+        if attendees_count >= capacity:
+            return jsonify({"error": "Kapacita je naplnená."}), 400
+
+        # Skontroluj existujúce prihlásenie
+        cur.execute("SELECT 1 FROM activity_signups WHERE activity_id = %s AND user_id = %s", (activity_id, user_id))
+        if cur.fetchone() is not None:
+            return jsonify({"error": "Už ste prihlásený na túto aktivitu."}), 400
+
+        # Vytvor prihlásenie + zvýš počet účastníkov
+        cur.execute("INSERT INTO activity_signups (activity_id, user_id) VALUES (%s, %s)", (activity_id, user_id))
+        cur.execute("UPDATE activities SET attendees_count = attendees_count + 1 WHERE id_activity = %s", (activity_id,))
+        conn.commit()
+
+        cur.execute("SELECT attendees_count FROM activities WHERE id_activity = %s", (activity_id,))
+        attendees_count = cur.fetchone()[0]
+        return jsonify({"attendees_count": attendees_count})
+    finally:
+        conn.close()
+
+
+@app.delete("/api/activities/<int:activity_id>/signup")
+def cancel_signup(activity_id):
+    data = request.get_json()
+    user_id = data.get("user_id")
+
+    if not user_id:
+        return jsonify({"error": "Nepodarilo sa identifikovať používateľa."}), 400
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM activity_signups WHERE activity_id = %s AND user_id = %s", (activity_id, user_id))
+        cur.execute("UPDATE activities SET attendees_count = GREATEST(attendees_count - 1, 0) WHERE id_activity = %s", (activity_id,))
+        conn.commit()
+        return jsonify({"message": "Úspešne odhlásený"})
+    finally:
         conn.close()
 
 

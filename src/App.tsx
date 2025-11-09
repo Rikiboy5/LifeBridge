@@ -5,6 +5,7 @@ import Users from "./pages/Users";
 import Register from "./pages/Register";
 import Login from "./pages/Login";
 import Posts from "./pages/Posts";
+import Blog from "./pages/Blog";
 
 
 
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
         <Route path="/posts" element={<Posts />} />
+        <Route path="/blog" element={<Blog />} />
       </Routes>
     </Router>
   );
