@@ -1,12 +1,8 @@
 import React from "react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-//import ChatbotWidget from "../components/chatbot";
-//import ChatbotWidget from "../components/Chatbot_voice";
-//import ChatbotWidget from "../components/Chatbot_voice2";
-//import ChatbotWidget from "../components/Chatbot_voice_accessible";
-import ChatbotWidget from "../components/Chatbot_voice2_merged_v9";
 
+import ChatbotWidget from "../components/Chatbot_voice2_merged_v9_SK";
 interface MainLayoutProps {
   children: React.ReactNode;
 
