@@ -1,11 +1,11 @@
 import React from "react";
 import MainLayout from "../layouts/MainLayout";
 import Card from "../components/Card";
+import Map from "../components/Map";
 
 import Garden from "../assets/img/garden.png";
 import Britain from "../assets/img/gb.png";
 import laptop from "../assets/img/laptop.png";
-
 
 export default function Home() {
   const offers = [
@@ -38,12 +38,21 @@ export default function Home() {
     },
   ];
 
+  // statické piny
+  const pins = [
+    { id: 1, name: "Ján Novák", lat: 48.1486, lng: 17.1077, description: "Pomoc so záhradou" },
+    { id: 2, name: "Mária Kováčová", lat: 48.7164, lng: 21.2611, description: "Doučovanie angličtiny" },
+    { id: 3, name: "Jozef Hrubý", lat: 48.377, lng: 17.588, description: "Pomoc s technológiami" },
+  ];
+
   return (
     <MainLayout>
-      <div className="max-w-6xl mx-auto p-8">
+      <div className="max-w-6xl mx-auto p-8 space-y-12">
         <h1 className="text-3xl font-bold text-center mb-10">
           🌉 Ponuky používateľov LifeBridge
         </h1>
+
+        <Map pins={pins} />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
           {offers.map((offer) => (
