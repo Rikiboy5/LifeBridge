@@ -23,7 +23,10 @@ export default function MainLayout({ children }: MainLayoutProps) {
 
       {/* Footer na spodku */}
       <Footer />
-      <ChatbotWidget />
+      <div className="fixed bottom-4 right-4 z-[99999]">
+            <ChatbotWidget />
+      </div>
+      
     </div>
   );
 }
