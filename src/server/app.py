@@ -15,10 +15,10 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 bcrypt = Bcrypt(app)
 
 # 🔧 DB konfigurácia
-DB_HOST = os.getenv("DB_HOST", "sql7.freesqldatabase.com")
-DB_USER = os.getenv("DB_USER", "sql7806067")
-DB_PASS = os.getenv("DB_PASS", "Y8yg3HRkEb")
-DB_NAME = os.getenv("DB_NAME", "sql7806067")
+DB_HOST = os.getenv("DB_HOST", "80.211.195.85")
+DB_USER = os.getenv("DB_USER", "admin")
+DB_PASS = os.getenv("DB_PASS", "bezpecneHeslo123!")
+DB_NAME = os.getenv("DB_NAME", "dbdata")
 DB_PORT = int(os.getenv("DB_PORT", "3306"))
 
 # 🧩 Connection pool
