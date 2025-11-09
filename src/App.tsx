@@ -8,6 +8,7 @@ import Posts from "./pages/Posts";
 import Blog from "./pages/Blog";
 import ActivityDetail from "./pages/ActivityDetail";
 import CreateActivity from "./pages/CreateActivity";
+import PublicProfile from "./pages/PublicProfile";
 
 
 
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/profil" element={<Profile />} />
         <Route path="/users" element={<Users />} />
+        <Route path="/user/:id" element={<PublicProfile />} />
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
         <Route path="/posts" element={<Posts />} />

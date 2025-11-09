@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import MainLayout from "../layouts/MainLayout";
+import { useNavigate } from "react-router-dom";
 
 interface User {
   id_user: number;
@@ -13,6 +14,7 @@ type UsersApiResp =
   | { items: User[]; pagination?: { page: number; page_size: number; total: number; pages: number } };
 
 export default function Users() {
+  const navigate = useNavigate();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
@@ -109,7 +111,7 @@ export default function Users() {
         ) : (
           <ul className="divide-y divide-gray-300 dark:divide-gray-700">
             {users.map((u) => (
-              <li key={u.id_user} className="py-3 flex justify-between items-center">
+              <li key={u.id_user} className="py-3 flex justify-between items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 px-2 rounded-md" onClick={() => navigate(`/user/${u.id_user}`)} title="Zobraziť profil">
                 <div>
                   <p className="font-semibold">{u.meno} {u.priezvisko}</p>
                   <p className="text-sm text-gray-500">{u.mail}</p>
