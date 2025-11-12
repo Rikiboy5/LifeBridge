@@ -694,23 +694,24 @@ def serve_avatar_file(filename: str):
 @app.get("/api/profile/<int:user_id>")
 def get_profile(user_id: int):
     """Načíta detaily profilu pre daného používateľa (bez hesla)."""
-    conn = get_conn()
-    try:
+    # Použi vždy čerstvé spojenie, aby sa predišlo prípadnému
+    # opätovnému použitiu už uzavretého spojenia z `g`.
+    with db_conn() as conn:
         cur = conn.cursor(dictionary=True)
-        cur.execute("""
-            SELECT 
-                u.id_user, u.meno, u.priezvisko, u.mail, u.datum_narodenia,
-                u.mesto, u.about, u.rola, u.created_at
-            FROM users u
-            WHERE u.id_user = %s AND u.soft_del = 0
-        """, (user_id,))
-        row = cur.fetchone()
-        if not row:
-            return jsonify({"error": "Používateľ neexistuje."}), 404
-        return jsonify(row), 200
-    finally:
-        cur.close()
-        conn.close()
+        try:
+            cur.execute("""
+                SELECT 
+                    u.id_user, u.meno, u.priezvisko, u.mail, u.datum_narodenia,
+                    u.mesto, u.about, u.rola, u.created_at
+                FROM users u
+                WHERE u.id_user = %s AND u.soft_del = 0
+            """, (user_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "Používateľ neexistuje."}), 404
+            return jsonify(row), 200
+        finally:
+            cur.close()
 
 
 @app.put("/api/profile/<int:user_id>")
