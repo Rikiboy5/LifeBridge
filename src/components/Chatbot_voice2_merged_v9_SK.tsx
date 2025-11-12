@@ -51,6 +51,8 @@ const STR = {
     `Zatiaľ si s týmto dotazom neviem rady – skús, prosím, spomenúť, či chceš prihlásenie, registráciu, profil, ponuky alebo používateľov.`,
   inputPh: "Spýtaj sa: kde je prihlásenie?|",
   quick: { login: "Prihlásenie", register: "Registrácia", profile: "Profil", offers: "Ponuky", users: "Používatelia" },
+  profileLoginRequired: "Nie si prihlásený. Najprv prejdi na Prihlásenie, prihlás sa a potom otvor Profil.",
+  profileLoginCta: "Prejsť na Prihlásenie",
   ttsOn: "Čítanie zapnuté",
   ttsOff: "Čítanie vypnuté",
   speakBtn: "🎤 Hovoriť",
@@ -69,7 +71,7 @@ function getLocalizedRouteLabel(path: string): string {
     "/": STR.routes.home,
     "/login": STR.routes.login,
     "/register": STR.routes.register,
-    "/profile": STR.routes.profile,
+    "/profil": STR.routes.profile,
     "/users": STR.routes.users,
     "/posts": STR.routes.posts,
   };
@@ -80,7 +82,7 @@ function routeFromText(text: string): string | null {
   const t = text.toLowerCase();
   if (/\b(prihlas|login|sign\s?in)\b/.test(t)) return "/login";
   if (/\b(registr|sign\s?up)\b/.test(t)) return "/register";
-  if (/\b(profil|account)\b/.test(t)) return "/profile";
+  if (/\b(profil|account)\b/.test(t)) return "/profil";
   if (/\b(pou[zž]ívatel|users?)\b/.test(t)) return "/users";
   if (/(pr[íi]spevky|prispevky|posts?)\b/.test(t)) return "/posts";
   if (/\b(domov|home|hlavn[áa])\b/.test(t)) return "/";
@@ -103,7 +105,7 @@ const FALLBACK_ROUTES: RouteInfo[] = [
       "create account","new account","registrujem sa","registruj ma","registracia nefunguje","neviem sa zaregistrovat",
       "neda sa registrovat","pomoc s registraciou","registrujem sa ale nejde","registrujem sa ale chyba","kde je registracne tlacidlo"
     ], description: "Vytvorenie nového účtu." },
-  { path: "/profile", label: STR.routes.profile, short: ["profil","account","účet","kde nájdem svoj profil","ako sa dostanem na profil","kde mám svoj účet",
+  { path: "/profil", label: STR.routes.profile, short: ["profil","account","účet","kde nájdem svoj profil","ako sa dostanem na profil","kde mám svoj účet",
     "chcem upraviť svoj profil","ako si zmením heslo","správa profilu","nastavenia účtu","zmeniť email","moje ponuky","otvor môj profil", "kde je moj profil","ako zmenim profil",
     "upravit profil","edit profil","zmenit fotku","upravim si meno","ako zmenim fotku","ako si upravim udaje","zmenit bio","ako zmenit udaje v profile","upravit osobne udaje",
     "nastavenia profilu","profilove nastavenia"
@@ -474,7 +476,23 @@ export default function ChatbotWidgetSKv9() {
     return localized || r.label;
   }
 
+  function hasActiveSession(): boolean {
+    try {
+      const raw = localStorage.getItem("user");
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      return Boolean(parsed && typeof parsed === "object");
+    } catch {
+      return false;
+    }
+  }
+
+  function stopSpeaking() {
+    try { window.speechSynthesis?.cancel(); } catch {}
+  }
+
   function forceNavigate(path: string) {
+    stopSpeaking();
     if (location.pathname === path) {
       navigate(0); // remount even if on same route
     } else {
@@ -509,6 +527,25 @@ export default function ChatbotWidgetSKv9() {
 
   function handleNavigate(r: RouteInfo) {
     const label = localizedLabelForRoute(r);
+    if (r.path === "/profil" && !hasActiveSession()) {
+      const text = STR.profileLoginRequired;
+      setMessages((prev) => [
+        ...prev,
+        <Bubble from="bot" key={`auth-${Date.now()}`}>
+          <div className="space-y-1">
+            <p>{text}</p>
+            <button
+              onClick={() => forceNavigate("/login")}
+              className="mt-1 inline-flex items-center gap-1 text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded-md"
+            >
+              {STR.profileLoginCta}
+            </button>
+          </div>
+        </Bubble>,
+      ]);
+      say(text);
+      return;
+    }
     const text = STR.opening(label, r.description);
     try { if (r.path === "/register") sessionStorage.setItem("chatbot_nav_to_register", "1"); } catch {}
     setMessages((prev) => [
