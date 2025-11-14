@@ -10,16 +10,35 @@ import ActivityDetail from "./pages/ActivityDetail";
 import CreateActivity from "./pages/CreateActivity";
 import PublicProfile from "./pages/PublicProfile";
 
-
+// pomocná funkcia – zistí, či je prihlásený admin
+function isCurrentUserAdmin(): boolean {
+  try {
+    const raw = localStorage.getItem("user");
+    if (!raw) return false;
+    const u = JSON.parse(raw);
+    const id = u?.id ?? u?.id_user ?? null;
+    return u?.role === "admin" || id === 1; // id 1 ako „superadmin“
+  } catch {
+    return false;
+  }
+}
 
 export default function App() {
+  const isAdmin = isCurrentUserAdmin();
+
   return (
     <Router>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/profil" element={<Profile />} />
         <Route path="/users" element={<Users />} />
-        <Route path="/user/:id" element={<PublicProfile />} />
+
+        {/* 👇 ak je admin → plný Profile, inak PublicProfile */}
+        <Route
+          path="/user/:id"
+          element={isAdmin ? <Profile /> : <PublicProfile />}
+        />
+
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
         <Route path="/posts" element={<Posts />} />
@@ -31,5 +50,3 @@ export default function App() {
     </Router>
   );
 }
-
-
