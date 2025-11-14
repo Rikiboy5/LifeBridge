@@ -265,16 +265,16 @@ def login_user():
                 "name": user["meno"],
                 "surname": user["priezvisko"],
                 "email": user["mail"],
-                "birthdate": user["datum_narodenia"]
+                "birthdate": user["datum_narodenia"],
+                "role": user.get("rola") or "user",
             }
         }), 200
     finally:
         cur.close()
         conn.close()
 
-
 # ==========================================
-# 👥 POUŽÍVATELIA (test)
+# 👥 POUŽÍVATELIA – LIST
 # ==========================================
 @app.get("/api/users")
 def get_users():
@@ -310,7 +310,6 @@ def get_users():
         score_sql = "0"  # default (bez q)
 
         if q:
-            # preferuj case/diakritiku-NEcitlivé kolácie v DB, napr. utf8mb4_0900_ai_ci
             like_any = f"%{q}%"
             like_prefix = f"{q}%"
             like_fullname_prefix = f"{q}%"
@@ -318,7 +317,6 @@ def get_users():
             where.append("(u.meno LIKE %s OR u.priezvisko LIKE %s OR u.mail LIKE %s OR CONCAT(u.meno,' ',u.priezvisko) LIKE %s)")
             params += [like_any, like_any, like_any, like_any]
 
-            # jednoduché bodovanie relevancie
             score_sql = """
                 (CASE WHEN CONCAT(u.meno,' ',u.priezvisko) = %s THEN 100 ELSE 0 END) +
                 (CASE WHEN CONCAT(u.meno,' ',u.priezvisko) LIKE %s THEN 60 ELSE 0 END) +
@@ -329,15 +327,13 @@ def get_users():
                 (CASE WHEN u.priezvisko LIKE %s THEN 8 ELSE 0 END) +
                 (CASE WHEN u.mail LIKE %s THEN 5 ELSE 0 END)
             """
-            # parametre pre score: exact, fullname prefix, prefixy a "contains"
             score_params = [
                 q,
                 like_fullname_prefix,
-                like_prefix, like_prefix, like_prefix,  # prefer prefix na mene/priezvisku/maily
-                like_any, like_any, like_any           # a potom ľubovoľné umiestnenie
+                like_prefix, like_prefix, like_prefix,
+                like_any, like_any, like_any
             ]
 
-            # ak je q, defaultne triedime podľa relevancie (alebo keď si vyžiadaš ?sort=relevance)
             if sort in ("relevance", "id_desc", "id_asc", "name_asc", "name_desc"):
                 sort_sql = f"score DESC, u.meno ASC, u.priezvisko ASC"
 
@@ -391,17 +387,50 @@ def get_users():
         conn.close()
 
 # ==========================================
+# 👥 POUŽÍVATELIA – DELETE
+# ==========================================
+@app.delete("/api/users/<int:user_id>")
+def delete_user(user_id: int):
+    # voliteľné – superadmin (id 1) sa nedá zmazať
+    if user_id == 1:
+        return jsonify({"error": "Hlavného admina nie je možné zmazať."}), 400
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+
+        # soft delete – aby sa ďalej neukazoval v zoznamoch
+        cur.execute(
+            "UPDATE users SET soft_del = 1 WHERE id_user = %s AND soft_del = 0",
+            (user_id,),
+        )
+
+        if cur.rowcount == 0:
+            return jsonify({
+                "error": "Používateľ neexistuje alebo je už zmazaný."
+            }), 404
+
+        conn.commit()
+        return jsonify({"success": True}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"Chyba pri mazaní používateľa: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+# ==========================================
 # 📝 PRÍSPEVKY
 # ==========================================
 
 @app.get("/api/posts")
 def get_posts():
     q = request.args.get("q", "").strip()
-    sort = request.args.get("sort", "id_desc").lower()  # id_desc | id_asc | title_asc | title_desc | relevance
+    sort = request.args.get("sort", "id_desc").lower()
     category = request.args.get("category", "").strip()
     author_id = request.args.get("author_id", "").strip()
 
-    # stránkovanie
     try:
         page = max(1, int(request.args.get("page", 1)))
     except (TypeError, ValueError):
@@ -457,7 +486,6 @@ def get_posts():
 
         where_sql = " AND ".join(where)
 
-        # total
         cur.execute(f"""
             SELECT COUNT(*) AS total
             FROM posts p
@@ -466,7 +494,6 @@ def get_posts():
         """, params)
         total = cur.fetchone()["total"]
 
-        # data
         if q:
             cur.execute(f"""
                 SELECT p.id_post, p.title, p.description, p.image, p.category,
@@ -516,7 +543,7 @@ def create_post():
     title = data.get("title")
     description = data.get("description")
     category = data.get("category")
-    image = data.get("image")  # môže byť None/base64/url
+    image = data.get("image")
     user_id = data.get("user_id")
 
     if not all([title, description, category, user_id]):
@@ -532,7 +559,6 @@ def create_post():
         new_id = cur.lastrowid
         conn.commit()
 
-        # vráť čerstvo vytvorený záznam (tak ako ho očakáva frontend)
         cur = conn.cursor(dictionary=True)
         cur.execute("""
             SELECT p.id_post, p.title, p.description, p.image, p.category,
@@ -565,7 +591,6 @@ def update_post(id_post):
     conn = get_conn()
     try:
         cur = conn.cursor()
-        # poskladaj SET dynamicky, aby sme nemenili polia na None ak neprišli
         sets = []
         params = []
         if title is not None:
@@ -622,7 +647,6 @@ def _validate_profile_payload(data: dict):
     if not data or not any(k in data for k in ALLOWED_PROFILE_FIELDS):
         return False, "Nie je čo aktualizovať."
 
-    # dĺžky a formáty
     if "meno" in data and (not data["meno"] or len(data["meno"]) > 100):
         return False, "Meno je povinné a môže mať max 100 znakov."
     if "priezvisko" in data and (not data["priezvisko"] or len(data["priezvisko"]) > 100):
@@ -633,19 +657,17 @@ def _validate_profile_payload(data: dict):
         return False, "Text „O mne“ môže mať max 5000 znakov."
     if "datum_narodenia" in data and data["datum_narodenia"]:
         try:
-            # očakáva sa 'YYYY-MM-DD'
             datetime.strptime(data["datum_narodenia"], "%Y-%m-%d")
         except Exception:
             return False, "Neplatný formát dátumu (použi YYYY-MM-DD)."
 
-    # nepovolené polia (napr. mail, heslo, rola) – ak by prišli, odmietneme
     forbidden = set(data.keys()) - ALLOWED_PROFILE_FIELDS
     if forbidden:
         return False, f"Nasledujúce polia nie je možné meniť: {', '.join(sorted(forbidden))}"
 
     return True, ""
 
-# Avatar (no DB) endpoints
+# Avatar endpoints
 @app.post("/api/profile/<int:user_id>/avatar")
 def upload_profile_avatar(user_id: int):
     file = request.files.get("file")
@@ -658,7 +680,6 @@ def upload_profile_avatar(user_id: int):
     if ext not in ALLOWED_IMAGE_EXTS:
         return jsonify({"error": "Nepodporovaný formát. Povolené: jpg, jpeg, png, gif, webp"}), 400
 
-    # remove old avatar with different ext
     for e in ALLOWED_IMAGE_EXTS:
         old = _avatar_path_for(user_id, e)
         try:
@@ -693,7 +714,6 @@ def serve_avatar_file(filename: str):
 
 @app.get("/api/profile/<int:user_id>")
 def get_profile(user_id: int):
-    """Načíta detaily profilu pre daného používateľa (bez hesla)."""
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
@@ -715,17 +735,11 @@ def get_profile(user_id: int):
 
 @app.put("/api/profile/<int:user_id>")
 def update_profile(user_id: int):
-    """
-    Aktualizuje profil prihláseného používateľa.
-    Meniteľné: meno, priezvisko, datum_narodenia, mesto, about
-    Nemeníme: mail, heslo, rola, soft_del, atď.
-    """
     data = request.get_json(force=True) or {}
     ok, msg = _validate_profile_payload(data)
     if not ok:
         return jsonify({"error": msg}), 400
 
-    # dynamický SET len pre povolené polia
     sets = []
     params = []
     for field in ALLOWED_PROFILE_FIELDS:
@@ -755,7 +769,6 @@ def update_profile(user_id: int):
         cur.close()
         conn.close()
 
-    # vráť čerstvo aktualizovaný profil
     return get_profile(user_id)
 
 
@@ -795,7 +808,6 @@ def put_user_hobbies(user_id: int):
     if not isinstance(hobbies, list):
         return jsonify({"error": "Pole 'hobbies' musí byť zoznam ID."}), 400
 
-    # odfiltruj duplicitné a non-int
     try:
         hobby_ids = sorted({int(hid) for hid in hobbies})
     except Exception:
@@ -804,7 +816,6 @@ def put_user_hobbies(user_id: int):
     conn = get_conn()
     try:
         cur = conn.cursor()
-        # voliteľne over, že hobby existujú
         if hobby_ids:
             cur.execute(
                 f"SELECT COUNT(*) FROM hobby WHERE id_hobby IN ({','.join(['%s']*len(hobby_ids))})",
@@ -814,7 +825,6 @@ def put_user_hobbies(user_id: int):
             if count != len(hobby_ids):
                 return jsonify({"error": "Niektoré hobby ID neexistujú."}), 400
 
-        # vymaž staré väzby a vlož nové (idempotentný replace)
         cur.execute("DELETE FROM user_hobby WHERE id_user = %s", (user_id,))
         if hobby_ids:
             cur.executemany(
@@ -831,7 +841,7 @@ def put_user_hobbies(user_id: int):
         conn.close()
 
 # ------------------------------------------
-# Nové endpointy pre activities
+# ACTIVITIES
 # ------------------------------------------
 
 @app.get("/api/activities")
@@ -847,9 +857,9 @@ def list_activities():
     """
     params = []
     if q:
-      sql += " WHERE title LIKE %s OR description LIKE %s"
-      like = f"%{q}%"
-      params.extend([like, like])
+        sql += " WHERE title LIKE %s OR description LIKE %s"
+        like = f"%{q}%"
+        params.extend([like, like])
     sql_count = "SELECT COUNT(*) AS total FROM (" + sql + ") t"
     sql += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
     params.extend([page_size, offset])
@@ -866,6 +876,7 @@ def list_activities():
             "total": total, "pages": (total + page_size - 1)//page_size
         }})
     finally:
+        cur.close()
         conn.close()
 
 
@@ -898,12 +909,14 @@ def create_activity():
         """, (title, description, image_url, capacity, lat, lng, user_id))
         activity_id = cur.lastrowid
         conn.commit()
+        cur = conn.cursor()
         cur.execute("SELECT * FROM activities WHERE id_activity = %s", (activity_id,))
         row = cur.fetchone()
         keys = [desc[0] for desc in cur.description]
         activity = dict(zip(keys, row))
         return jsonify(activity)
     finally:
+        cur.close()
         conn.close()
 
 
@@ -918,7 +931,6 @@ def signup_activity(activity_id):
     conn = get_conn()
     try:
         cur = conn.cursor()
-        # Over kapacitu
         cur.execute("SELECT capacity, attendees_count FROM activities WHERE id_activity = %s FOR UPDATE", (activity_id,))
         row = cur.fetchone()
         if row is None:
@@ -927,12 +939,10 @@ def signup_activity(activity_id):
         if attendees_count >= capacity:
             return jsonify({"error": "Kapacita je naplnená."}), 400
 
-        # Skontroluj existujúce prihlásenie
         cur.execute("SELECT 1 FROM activity_signups WHERE activity_id = %s AND user_id = %s", (activity_id, user_id))
         if cur.fetchone() is not None:
             return jsonify({"error": "Už ste prihlásený na túto aktivitu."}), 400
 
-        # Vytvor prihlásenie + zvýš počet účastníkov
         cur.execute("INSERT INTO activity_signups (activity_id, user_id) VALUES (%s, %s)", (activity_id, user_id))
         cur.execute("UPDATE activities SET attendees_count = attendees_count + 1 WHERE id_activity = %s", (activity_id,))
         conn.commit()
@@ -941,6 +951,7 @@ def signup_activity(activity_id):
         attendees_count = cur.fetchone()[0]
         return jsonify({"attendees_count": attendees_count})
     finally:
+        cur.close()
         conn.close()
 
 
@@ -960,6 +971,7 @@ def cancel_signup(activity_id):
         conn.commit()
         return jsonify({"message": "Úspešne odhlásený"})
     finally:
+        cur.close()
         conn.close()
 
 
