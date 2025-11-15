@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import MainLayout from "../layouts/MainLayout";
 import Card from "../components/Card";
-import DefaultAvatar from "../assets/img/teen.jpg";
 
 type User = {
   id_user: number;
@@ -68,7 +67,7 @@ export default function PublicProfile() {
   const [user, setUser] = useState<User | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [hobbies, setHobbies] = useState<Hobby[]>([]);
-  const [avatar, setAvatar] = useState<string>(DefaultAvatar);
+  const [avatar, setAvatar] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,7 +89,7 @@ export default function PublicProfile() {
         const pData = await pRes.json();
         const pItems: Post[] = Array.isArray(pData) ? pData : (pData.items ?? []);
         const hItems: Hobby[] = hRes.ok ? await hRes.json() : [];
-        let avatarUrl = DefaultAvatar;
+        let avatarUrl: string | null = null;
         if (aRes.ok) {
           const a = await aRes.json();
           if (a?.url) avatarUrl = `${baseUrl}${a.url}`;
@@ -113,14 +112,51 @@ export default function PublicProfile() {
   if (loading) return <MainLayout><p className="text-center mt-10">Načítavam profil…</p></MainLayout>;
   if (error || !user) return <MainLayout><p className="text-center mt-10 text-red-500">{error || "Profil neexistuje"}</p></MainLayout>;
 
-  const fullName = `${user.meno} ${user.priezvisko}`.trim();
+  const fullName = `${user.meno ?? ""} ${user.priezvisko ?? ""}`.trim();
+  const initials = (() => {
+    const first = user.meno?.trim()?.[0] ?? "";
+    const last = user.priezvisko?.trim()?.[0] ?? "";
+    const combo = `${first}${last}`.trim();
+    if (combo) return combo.toUpperCase();
+    const fallback = (user.meno ?? user.priezvisko ?? "").trim();
+    return (fallback[0] || "?").toUpperCase();
+  })();
+  const avatarAlt = fullName || user.mail || "Profilová fotka";
+
+  const AvatarCircle = ({
+    sizeClass = "w-32 h-32",
+    textClass = "text-3xl",
+    borderClass = "border-4 border-blue-600 dark:border-indigo-400 shadow",
+  }: {
+    sizeClass?: string;
+    textClass?: string;
+    borderClass?: string;
+  }) => {
+    if (avatar) {
+      return (
+        <img
+          src={avatar}
+          alt={avatarAlt}
+          className={`${sizeClass} rounded-full object-cover ${borderClass}`}
+        />
+      );
+    }
+    return (
+      <div
+        className={`${sizeClass} rounded-full ${borderClass} bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-semibold ${textClass}`}
+        aria-label={avatarAlt}
+      >
+        {initials}
+      </div>
+    );
+  };
 
   return (
     <MainLayout>
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-blue-50 dark:from-gray-900 dark:to-gray-800 text-gray-900 dark:text-gray-100">
         <div className="max-w-4xl mx-auto p-8">
           <div className="bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-8 flex flex-col items-center text-center space-y-4">
-            <img src={avatar} alt="Profilová fotka" className="w-32 h-32 rounded-full object-cover border-4 border-blue-600 dark:border-indigo-400 shadow" />
+            <AvatarCircle />
             <h2 className="text-2xl font-bold">{fullName}</h2>
           </div>
 

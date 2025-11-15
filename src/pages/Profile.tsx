@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import ManImage from "../assets/img/teen.jpg";
 import CardCreator from "../components/CardCreator";
 import Card from "../components/Card";
 import MainLayout from "../layouts/MainLayout";
@@ -25,6 +24,7 @@ type Post = {
   name: string;
   surname: string;
 };
+
 
 // helper: normalize to YYYY-MM-DD (robustly handle various formats)
 const onlyDate = (val: string | null | undefined): string => {
@@ -188,7 +188,50 @@ export default function Profile() {
     })();
   }, [currentUserId]);
 
-  const fullName = profile ? `${profile.meno} ${profile.priezvisko}`.trim() : "";
+ 
+  const fullName = useMemo(() => {
+    if (!profile) return "";
+    return `${profile.meno ?? ""} ${profile.priezvisko ?? ""}`.trim();
+  }, [profile?.meno, profile?.priezvisko]);
+
+  const initials = useMemo(() => {
+    const first = profile?.meno?.trim()?.[0] ?? "";
+    const last = profile?.priezvisko?.trim()?.[0] ?? "";
+    const combo = `${first}${last}`.trim();
+    if (combo) return combo.toUpperCase();
+    const fallback = (profile?.meno ?? profile?.priezvisko ?? "").trim();
+    return (fallback[0] || "?").toUpperCase();
+  }, [profile?.meno, profile?.priezvisko]);
+
+  const avatarAlt = fullName || profile?.mail || "Profilová fotka";
+
+  const AvatarCircle = ({
+    sizeClass = "w-32 h-32",
+    textClass = "text-3xl",
+    borderClass = "border-4 border-blue-600 dark:border-indigo-400 shadow",
+  }: {
+    sizeClass?: string;
+    textClass?: string;
+    borderClass?: string;
+  }) => {
+    if (avatarSrc) {
+      return (
+        <img
+          src={avatarSrc}
+          alt={avatarAlt}
+          className={`${sizeClass} rounded-full object-cover ${borderClass}`}
+        />
+      );
+    }
+    return (
+      <div
+        className={`${sizeClass} rounded-full ${borderClass} bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-semibold ${textClass}`}
+        aria-label={avatarAlt}
+      >
+        {initials}
+      </div>
+    );
+  };
 
   const handleSave = async () => {
     if (!profile) return;
@@ -251,6 +294,8 @@ export default function Profile() {
     }
   };
 
+ 
+
   const handleEditPost = async (postData: { title: string; description: string; image?: string | null; category: string; }) => {
     if (!editingPost) return;
     try {
@@ -284,11 +329,7 @@ export default function Profile() {
         <div className="max-w-4xl mx-auto p-8">
           {/* Profilová hlavička */}
           <div className="bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-8 flex flex-col items-center text-center space-y-4">
-            <img
-              src={avatarSrc || ManImage}
-              alt="Profilová fotka"
-              className="w-32 h-32 rounded-full object-cover border-4 border-blue-600 dark:border-indigo-400 shadow"
-            />
+            <AvatarCircle />
             <h2 className="text-2xl font-bold">{fullName}</h2>
             {/* O mne sa zobrazuje iba v samostatnej sekcii nižšie */}
             <button
@@ -458,7 +499,7 @@ export default function Profile() {
                 <div>
                   <label className="block text-sm mb-1">Profilová fotka</label>
                   <div className="flex items-center gap-4">
-                    <img src={avatarSrc || ManImage} className="w-16 h-16 rounded-full object-cover border" alt="Náhľad" />
+                    <AvatarCircle sizeClass="w-16 h-16" textClass="text-lg" borderClass="border border-gray-300 dark:border-gray-600" />
                     <input
                       type="file"
                       accept="image/*"
@@ -518,6 +559,8 @@ export default function Profile() {
                     />
                   </div>
                 </div>
+
+                
 
                 <div>
                   <label className="block text-sm mb-1">O mne</label>
