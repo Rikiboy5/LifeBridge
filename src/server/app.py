@@ -331,6 +331,7 @@ def login_user():
 def get_users():
     q = request.args.get("q", "").strip()
     sort = request.args.get("sort", "id_desc").lower()  # id_desc | id_asc | name_asc | name_desc | relevance
+    role_filter = request.args.get("role", "").strip()
 
     # stránkovanie
     try:
@@ -349,6 +350,8 @@ def get_users():
         "id_asc": "u.id_user ASC",
         "name_asc": "u.meno ASC, u.priezvisko ASC",
         "name_desc": "u.meno DESC, u.priezvisko DESC",
+        "rating_desc": "COALESCE(r.avg_rating, 0) DESC, COALESCE(r.rating_count, 0) DESC, u.id_user DESC",
+        "rating_asc": "COALESCE(r.avg_rating, 0) ASC, COALESCE(r.rating_count, 0) ASC, u.id_user DESC",
     }.get(sort, "u.id_user DESC")
 
     conn = get_conn()
@@ -359,6 +362,11 @@ def get_users():
         params = []
 
         score_sql = "0"  # default (bez q)
+
+        allowed_roles = {"user_dobrovolnik", "user_firma", "user_senior"}
+        if role_filter and role_filter in allowed_roles:
+            where.append("u.rola = %s")
+            params.append(role_filter)
 
         if q:
             # preferuj case/diakritiku-NEcitlivé kolácie v DB, napr. utf8mb4_0900_ai_ci
