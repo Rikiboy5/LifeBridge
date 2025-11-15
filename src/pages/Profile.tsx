@@ -25,6 +25,15 @@ type Post = {
   surname: string;
 };
 
+const ROLE_LABELS: Record<string, string> = {
+  user_dobrovolnik: "Dobrovoľník",
+  user_firma: "Firma",
+  user_senior: "Dôchodca",
+ 
+};
+
+const formatRole = (role?: string | null) => ROLE_LABELS[role ?? ""] || "Pou??vate?";
+
 
 // helper: normalize to YYYY-MM-DD (robustly handle various formats)
 const onlyDate = (val: string | null | undefined): string => {
@@ -193,6 +202,8 @@ export default function Profile() {
     if (!profile) return "";
     return `${profile.meno ?? ""} ${profile.priezvisko ?? ""}`.trim();
   }, [profile?.meno, profile?.priezvisko]);
+
+  const roleText = useMemo(() => formatRole(profile?.rola), [profile?.rola]);
 
   const initials = useMemo(() => {
     const first = profile?.meno?.trim()?.[0] ?? "";
@@ -428,6 +439,7 @@ export default function Profile() {
             <div className="bg-white dark:bg-gray-800 shadow-md rounded-2xl p-6">
               <h3 className="text-lg font-semibold mb-3">Základné údaje</h3>
               <ul className="space-y-2 text-gray-700 dark:text-gray-300">
+                <li>Rola: <span className="font-semibold">{roleText}</span></li>
                 <li>Mesto: {profile?.mesto?.trim() || "Neuvedené"}</li>
                 <li>Dátum narodenia: {profile?.datum_narodenia ? String(profile.datum_narodenia) : "Neuvedené"}</li>
                 <li>E-mail: {profile?.mail ?? ""}</li>

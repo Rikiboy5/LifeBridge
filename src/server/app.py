@@ -356,7 +356,7 @@ def get_users():
         if q:
             cur.execute(
                 f"""
-                SELECT u.id_user, u.meno, u.priezvisko, u.mail,
+                SELECT u.id_user, u.meno, u.priezvisko, u.mail, u.rola,
                        {score_sql} AS score
                 FROM users u
                 WHERE {where_sql}
@@ -368,7 +368,7 @@ def get_users():
         else:
             cur.execute(
                 f"""
-                SELECT u.id_user, u.meno, u.priezvisko, u.mail
+                SELECT u.id_user, u.meno, u.priezvisko, u.mail, u.rola
                 FROM users u
                 WHERE {where_sql}
                 ORDER BY {sort_sql}

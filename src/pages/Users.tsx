@@ -7,11 +7,20 @@ interface User {
   meno: string;
   priezvisko: string;
   mail: string;
+  rola?: string;
 }
 
 type UsersApiResp =
   | User[] // keď BE vráti čisté pole (bez q)
   | { items: User[]; pagination?: { page: number; page_size: number; total: number; pages: number } };
+
+const ROLE_LABELS: Record<string, string> = {
+  user_dobrovolnik: "Dobrovoľník",
+  user_firma: "Firma",
+  user_senior: "Dôchodca",
+};
+
+const roleLabel = (role?: string | null) => ROLE_LABELS[role ?? ""] || "Používateľ";
 
 export default function Users() {
   const navigate = useNavigate();
@@ -193,6 +202,9 @@ export default function Users() {
                   {user.meno} {user.priezvisko}
                 </p>
                 <p className="text-sm text-gray-500 dark:text-gray-400">{user.mail}</p>
+                <span className="inline-flex mt-1 -ml-1 items-center px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-200">
+                  {roleLabel(user.rola)}
+                </span>
               </div>
             </div>
             <div className="text-xs text-gray-400 dark:text-gray-500">

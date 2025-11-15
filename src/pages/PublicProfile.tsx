@@ -11,6 +11,7 @@ type User = {
   datum_narodenia?: string | null;
   mesto?: string | null;
   about?: string | null;
+  rola?: string | null;
 };
 
 type Post = {
@@ -24,6 +25,14 @@ type Post = {
 };
 
 type Hobby = { id_hobby: number; nazov: string; id_kategoria: number; kategoria_nazov?: string };
+
+const ROLE_LABELS: Record<string, string> = {
+  user_dobrovolnik: "Dobrovoľník",
+  user_firma: "Firma",
+  user_senior: "Dôchodca",
+};
+
+const formatRole = (role?: string | null) => ROLE_LABELS[role ?? ""] || "Použivateľ";
 
 const onlyDate = (val?: string | null) => {
   if (!val) return "";
@@ -122,6 +131,7 @@ export default function PublicProfile() {
     return (fallback[0] || "?").toUpperCase();
   })();
   const avatarAlt = fullName || user.mail || "Profilová fotka";
+  const roleText = formatRole(user.rola);
 
   const AvatarCircle = ({
     sizeClass = "w-32 h-32",
@@ -165,6 +175,7 @@ export default function PublicProfile() {
             <div className="bg-white dark:bg-gray-800 shadow-md rounded-2xl p-6">
               <h3 className="text-lg font-semibold mb-3">Základné údaje</h3>
               <ul className="space-y-2 text-gray-700 dark:text-gray-300">
+                <li>Rola: <span className="font-semibold">{roleText}</span></li>
                 <li>E-mail: {user.mail}</li>
                 {user.mesto && <li>Mesto: {user.mesto}</li>}
                 {user.datum_narodenia && <li>Dátum narodenia: {onlyDate(user.datum_narodenia)}</li>}
