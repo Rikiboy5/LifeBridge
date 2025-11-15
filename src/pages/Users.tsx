@@ -186,8 +186,8 @@ export default function Users() {
           </p>
         </div>
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <div className="relative md:col-span-2">
+      <div className="mt-4 space-y-3">
+        <div className="relative">
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -197,27 +197,31 @@ export default function Users() {
           />
           <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg">?</span>
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row md:flex-col">
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            className="w-full border rounded-2xl px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:border-gray-700"
-            aria-label="Filter role"
-          >
-            {ROLE_FILTER_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-          <select
-            value={sortOption}
-            onChange={(e) => setSortOption(e.target.value)}
-            className="w-full border rounded-2xl px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:border-gray-700"
-            aria-label="Triedenie"
-          >
-            {SORT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="w-full border rounded-2xl px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:border-gray-700"
+              aria-label="Filter role"
+            >
+              {ROLE_FILTER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <select
+              value={sortOption}
+              onChange={(e) => setSortOption(e.target.value)}
+              className="w-full border rounded-2xl px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:border-gray-700"
+              aria-label="Triedenie"
+            >
+              {SORT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
       <div className="text-xs text-gray-500 mt-1">

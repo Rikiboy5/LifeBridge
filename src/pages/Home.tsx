@@ -19,6 +19,16 @@ interface Activity {
   lng: number;
 }
 
+interface TopUser {
+  id_user: number;
+  meno?: string | null;
+  priezvisko?: string | null;
+  mail?: string | null;
+  rola?: string | null;
+  avg_rating?: number | null;
+  rating_count?: number | null;
+}
+
 export default function Home() {
   const offers = [
     {
@@ -79,6 +89,8 @@ export default function Home() {
 
   const [activities, setActivities] = useState<Activity[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [topUsers, setTopUsers] = useState<TopUser[]>([]);
+  const [topError, setTopError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -96,6 +108,20 @@ export default function Home() {
         setActivities(normalized);
       } catch (e: any) {
         setError(e.message || "Nepodarilo sa načítať aktivity");
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setTopError(null);
+        const res = await fetch("/api/users/top-rated?limit=6&days=7");
+        if (!res.ok) throw new Error("Nepodarilo sa nacitat najlepsie hodnotenych");
+        const data: TopUser[] = await res.json();
+        setTopUsers(Array.isArray(data) ? data : []);
+      } catch (e: any) {
+        setTopError(e.message || "Nepodarilo sa nacitat najlepsie hodnotenych");
       }
     })();
   }, []);
@@ -221,6 +247,51 @@ export default function Home() {
             />
           ))}
         </div>
+
+        <section className="bg-white dark:bg-gray-900 rounded-2xl shadow-md p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-semibold">Najlepšie hodnotení používatelia</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Hodnotenie za posledný týždeň.
+              </p>
+            </div>
+            <Link to="/users" className="text-blue-600 hover:underline text-sm">
+              Zobraziť všetkých
+            </Link>
+          </div>
+          {topError ? (
+            <p className="mt-4 text-sm text-red-500">{topError}</p>
+          ) : topUsers.length === 0 ? (
+            <p className="mt-4 text-sm text-gray-500">
+              Zatiaľ nemáme dosť hodnotení pre zobrazenie rebríčka.
+            </p>
+          ) : (
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              {topUsers.map((user, index) => (
+                <div
+                  key={user.id_user}
+                  className="flex items-center gap-4 rounded-xl border border-gray-100 dark:border-gray-700 p-4 hover:shadow"
+                >
+                  <div className="w-10 h-10 flex items-center justify-center rounded-full bg-indigo-100 text-indigo-700 font-semibold">
+                    {index + 1}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-lg font-semibold">
+                      {(user.meno ?? "") + " " + (user.priezvisko ?? "")}
+                    </p>
+                    <p className="text-sm text-gray-500">{user.mail}</p>
+                    <div className="text-sm text-yellow-500 flex items-center gap-1 mt-1">
+                      <span aria-hidden="true">{"\u2605"}</span>
+                      <span>{(user.avg_rating ?? 0).toFixed(1)}</span>
+                      <span className="text-xs text-gray-500">({user.rating_count ?? 0})</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </MainLayout>
   );

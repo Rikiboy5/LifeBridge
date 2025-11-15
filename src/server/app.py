@@ -563,6 +563,49 @@ def get_user_ratings(user_id):
         conn.close()
 
 
+@app.get("/api/users/top-rated")
+def get_top_rated_users():
+    try:
+        limit = max(1, min(20, int(request.args.get("limit", 6))))
+    except (TypeError, ValueError):
+        limit = 5
+    try:
+        days = max(1, min(90, int(request.args.get("days", 7))))
+    except (TypeError, ValueError):
+        days = 7
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT u.id_user,
+                   u.meno,
+                   u.priezvisko,
+                   u.mail,
+                   u.rola,
+                   AVG(r.rating) AS avg_rating,
+                   COUNT(*) AS rating_count
+            FROM user_ratings r
+            JOIN users u ON u.id_user = r.user_id
+            WHERE r.created_at >= NOW() - INTERVAL %s DAY
+              AND u.soft_del = 0
+            GROUP BY u.id_user, u.meno, u.priezvisko, u.mail, u.rola
+            HAVING rating_count > 0
+            ORDER BY avg_rating DESC, rating_count DESC, u.id_user DESC
+            LIMIT %s
+            """,
+            (days, limit),
+        )
+        rows = [_normalize_user_rating_fields(row) for row in cur.fetchall()]
+        return jsonify(rows), 200
+    except Exception as e:
+        return jsonify({"error": f"Chyba pri nacitani hodnoteni: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.post("/api/users/<int:user_id>/ratings")
 def upsert_user_rating(user_id):
     data = request.get_json(force=True)
