@@ -125,6 +125,30 @@ def _serialize_rating_row(row):
         "rated_by_name": full_name or None,
     }
 
+
+def _normalize_user_rating_fields(row):
+    if not row:
+        return row
+    if "avg_rating" in row:
+        val = row.get("avg_rating")
+        if val is None:
+            row["avg_rating"] = None
+        else:
+            try:
+                row["avg_rating"] = float(val)
+            except (TypeError, ValueError):
+                row["avg_rating"] = None
+    if "rating_count" in row:
+        val = row.get("rating_count")
+        if val is None:
+            row["rating_count"] = 0
+        else:
+            try:
+                row["rating_count"] = int(val)
+            except (TypeError, ValueError):
+                row["rating_count"] = 0
+    return row
+
 # ==========================================
 # 🎨 ZÍSKANIE VŠETKÝCH HOBBY
 # ==========================================
@@ -375,12 +399,27 @@ def get_users():
         total = cur.fetchone()["total"]
 
         # data
+        rating_join = """
+            LEFT JOIN (
+                SELECT user_id, AVG(rating) AS avg_rating, COUNT(*) AS rating_count
+                FROM user_ratings
+                GROUP BY user_id
+            ) r ON r.user_id = u.id_user
+        """
+
         if q:
             cur.execute(
                 f"""
-                SELECT u.id_user, u.meno, u.priezvisko, u.mail, u.rola,
+                SELECT u.id_user,
+                       u.meno,
+                       u.priezvisko,
+                       u.mail,
+                       u.rola,
+                       r.avg_rating,
+                       r.rating_count,
                        {score_sql} AS score
                 FROM users u
+                {rating_join}
                 WHERE {where_sql}
                 ORDER BY {sort_sql}
                 LIMIT %s OFFSET %s
@@ -390,8 +429,15 @@ def get_users():
         else:
             cur.execute(
                 f"""
-                SELECT u.id_user, u.meno, u.priezvisko, u.mail, u.rola
+                SELECT u.id_user,
+                       u.meno,
+                       u.priezvisko,
+                       u.mail,
+                       u.rola,
+                       r.avg_rating,
+                       r.rating_count
                 FROM users u
+                {rating_join}
                 WHERE {where_sql}
                 ORDER BY {sort_sql}
                 LIMIT %s OFFSET %s
@@ -399,7 +445,7 @@ def get_users():
                 params + [page_size, offset],
             )
 
-        rows = cur.fetchall()
+        rows = [_normalize_user_rating_fields(dict(row)) for row in cur.fetchall()]
 
         if not q:
             return jsonify(rows), 200
@@ -473,7 +519,7 @@ def get_user_ratings(user_id):
             ORDER BY r.created_at DESC
             LIMIT %s OFFSET %s
         """, (user_id, page_size, offset))
-        rows = cur.fetchall()
+        rows = [_normalize_user_rating_fields(dict(row)) for row in cur.fetchall()]
         items = [item for item in (_serialize_rating_row(row) for row in rows) if item]
 
         my_rating = None

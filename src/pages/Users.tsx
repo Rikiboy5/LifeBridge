@@ -8,6 +8,8 @@ interface User {
   priezvisko: string;
   mail: string;
   rola?: string;
+  avg_rating?: number | null;
+  rating_count?: number | null;
 }
 
 type UsersApiResp =
@@ -143,6 +145,21 @@ export default function Users() {
     );
   };
 
+  const renderRatingInfo = (user: User) => {
+    const hasRating = typeof user.avg_rating === "number" && (user.rating_count ?? 0) > 0;
+    if (!hasRating) {
+      return <span className="text-xs text-gray-400 dark:text-gray-500">Bez hodnotenia</span>;
+    }
+    const ratingValue = (user.avg_rating ?? 0).toFixed(1);
+    return (
+      <div className="flex items-center gap-1 text-sm text-yellow-500 dark:text-yellow-400">
+        <span aria-hidden="true">★</span>
+        <span className="font-semibold">{ratingValue}</span>
+        <span className="text-xs text-gray-500 dark:text-gray-400">({user.rating_count})</span>
+      </div>
+    );
+  };
+
   const header = (
     <div className="mb-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -207,7 +224,8 @@ export default function Users() {
                 </span>
               </div>
             </div>
-            <div className="text-xs text-gray-400 dark:text-gray-500">
+            <div>
+              {renderRatingInfo(user)}
             </div>
           </div>
         ))}
