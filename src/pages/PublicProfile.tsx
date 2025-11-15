@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import MainLayout from "../layouts/MainLayout";
 import Card from "../components/Card";
+import UserRatingsSection from "../components/UserRatingsSection";
 
 type User = {
   id_user: number;
@@ -222,8 +223,12 @@ export default function PublicProfile() {
               </div>
             )}
           </div>
+
+          <UserRatingsSection userId={userId} currentUserId={currentUserId} baseUrl={baseUrl} className="mt-10" />
         </div>
       </div>
     </MainLayout>
   );
 }
+
+

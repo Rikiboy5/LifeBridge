@@ -103,6 +103,28 @@ def validate_password(password):
     
     return True, ""
 
+
+def _serialize_rating_row(row):
+    if not row:
+        return None
+    created_at = row.get("created_at")
+    if isinstance(created_at, datetime):
+        created_at_str = created_at.isoformat()
+    else:
+        created_at_str = created_at
+    first = (row.get("meno") or "").strip()
+    last = (row.get("priezvisko") or "").strip()
+    full_name = " ".join(part for part in [first, last] if part).strip()
+    return {
+        "id_rating": row.get("id_rating"),
+        "user_id": row.get("user_id"),
+        "rated_by_user_id": row.get("rated_by_user_id"),
+        "rating": row.get("rating"),
+        "comment": row.get("comment"),
+        "created_at": created_at_str,
+        "rated_by_name": full_name or None,
+    }
+
 # ==========================================
 # 🎨 ZÍSKANIE VŠETKÝCH HOBBY
 # ==========================================
@@ -398,6 +420,186 @@ def get_users():
 # ==========================================
 # 📝 PRÍSPEVKY
 # ==========================================
+
+# ==========================================
+# HODNOTENIA POUZIVATELOV
+# ==========================================
+
+@app.get("/api/users/<int:user_id>/ratings")
+def get_user_ratings(user_id):
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+
+    limit_arg = request.args.get("limit")
+    try:
+        default_page_size = int(limit_arg) if limit_arg is not None else 10
+    except (TypeError, ValueError):
+        default_page_size = 10
+
+    try:
+        page_size = int(request.args.get("page_size", default_page_size))
+    except (TypeError, ValueError):
+        page_size = default_page_size
+    page_size = max(1, min(50, page_size))
+    offset = (page - 1) * page_size
+
+    rated_by_param = request.args.get("rated_by")
+    try:
+        rated_by_user_id = int(rated_by_param) if rated_by_param is not None else None
+    except (TypeError, ValueError):
+        rated_by_user_id = None
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT COUNT(*) AS total, AVG(rating) AS avg_rating
+            FROM user_ratings
+            WHERE user_id = %s
+        """, (user_id,))
+        stats_row = cur.fetchone() or {"total": 0, "avg_rating": None}
+        avg_rating = stats_row.get("avg_rating")
+        avg_value = float(avg_rating) if avg_rating is not None else None
+        total = int(stats_row.get("total") or 0)
+
+        cur.execute("""
+            SELECT r.id_rating, r.user_id, r.rated_by_user_id, r.rating, r.comment, r.created_at,
+                   u.meno, u.priezvisko
+            FROM user_ratings r
+            LEFT JOIN users u ON u.id_user = r.rated_by_user_id
+            WHERE r.user_id = %s
+            ORDER BY r.created_at DESC
+            LIMIT %s OFFSET %s
+        """, (user_id, page_size, offset))
+        rows = cur.fetchall()
+        items = [item for item in (_serialize_rating_row(row) for row in rows) if item]
+
+        my_rating = None
+        if rated_by_user_id:
+            cur.execute("""
+                SELECT r.id_rating, r.user_id, r.rated_by_user_id, r.rating, r.comment, r.created_at,
+                       u.meno, u.priezvisko
+                FROM user_ratings r
+                LEFT JOIN users u ON u.id_user = r.rated_by_user_id
+                WHERE r.user_id = %s AND r.rated_by_user_id = %s
+                LIMIT 1
+            """, (user_id, rated_by_user_id))
+            my_rating = _serialize_rating_row(cur.fetchone())
+
+        total_pages = (total + page_size - 1) // page_size
+
+        return jsonify({
+            "items": items,
+            "stats": {
+                "average": avg_value,
+                "count": total,
+            },
+            "my_rating": my_rating,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "pages": total_pages,
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"Chyba pri nacitani hodnoteni: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.post("/api/users/<int:user_id>/ratings")
+def upsert_user_rating(user_id):
+    data = request.get_json(force=True)
+    rated_by_user_id = data.get("rated_by_user_id")
+    rating_value = data.get("rating")
+    comment = (data.get("comment") or "").strip()
+
+    try:
+        rated_by_user_id = int(rated_by_user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Neplatne ID hodnotiaceho pouzivatela."}), 400
+
+    if rated_by_user_id == user_id:
+        return jsonify({"error": "Pouzivatel sa nemoze hodnotit sam."}), 400
+
+    try:
+        rating_value = int(rating_value)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Neplatna hodnota ratingu."}), 400
+
+    if rating_value < 1 or rating_value > 5:
+        return jsonify({"error": "Hodnotenie musi byt v rozsahu 1 az 5."}), 400
+
+    if not comment:
+        comment = None
+    elif len(comment) > 1000:
+        comment = comment[:1000]
+
+    conn = get_conn()
+    cur = None
+    write_cur = None
+    detail_cur = None
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT id_user FROM users WHERE id_user IN (%s, %s)", (user_id, rated_by_user_id))
+        ids = {row["id_user"] for row in cur.fetchall()}
+        if user_id not in ids:
+            return jsonify({"error": "Hodnoteny pouzivatel neexistuje."}), 404
+        if rated_by_user_id not in ids:
+            return jsonify({"error": "Hodnotiaci pouzivatel neexistuje."}), 400
+
+        cur.execute("""
+            SELECT id_rating
+            FROM user_ratings
+            WHERE user_id = %s AND rated_by_user_id = %s
+        """, (user_id, rated_by_user_id))
+        existing = cur.fetchone()
+        cur.close()
+        cur = None
+
+        write_cur = conn.cursor()
+        if existing:
+            write_cur.execute("""
+                UPDATE user_ratings
+                SET rating = %s, comment = %s, created_at = NOW()
+                WHERE id_rating = %s
+            """, (rating_value, comment, existing["id_rating"]))
+            status_code = 200
+        else:
+            write_cur.execute("""
+                INSERT INTO user_ratings (user_id, rated_by_user_id, rating, comment)
+                VALUES (%s, %s, %s, %s)
+            """, (user_id, rated_by_user_id, rating_value, comment))
+            status_code = 201
+        conn.commit()
+        write_cur.close()
+        write_cur = None
+
+        detail_cur = conn.cursor(dictionary=True)
+        detail_cur.execute("""
+            SELECT r.id_rating, r.user_id, r.rated_by_user_id, r.rating, r.comment, r.created_at,
+                   u.meno, u.priezvisko
+            FROM user_ratings r
+            LEFT JOIN users u ON u.id_user = r.rated_by_user_id
+            WHERE r.user_id = %s AND r.rated_by_user_id = %s
+            LIMIT 1
+        """, (user_id, rated_by_user_id))
+        saved = _serialize_rating_row(detail_cur.fetchone())
+
+        return jsonify({"message": "Hodnotenie ulozene.", "rating": saved}), status_code
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"Chyba pri ukladani hodnotenia: {str(e)}"}), 500
+    finally:
+        if cur:
+            cur.close()
+        if write_cur:
+            write_cur.close()
+        if detail_cur:
+            detail_cur.close()
+        conn.close()
 
 @app.get("/api/posts")
 def get_posts():

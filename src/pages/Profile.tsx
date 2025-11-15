@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import CardCreator from "../components/CardCreator";
 import Card from "../components/Card";
+import UserRatingsSection from "../components/UserRatingsSection";
 import MainLayout from "../layouts/MainLayout";
 
 type User = {
@@ -498,6 +499,14 @@ export default function Profile() {
               </div>
             )}
           </div>
+
+          <UserRatingsSection
+            userId={profile?.id_user ?? currentUserId ?? undefined}
+            currentUserId={currentUserId}
+            baseUrl={baseUrl}
+            showRateButton={false}
+            className="mt-10"
+          />
         </div>
 
         {/* Editor profilu (modal) */}
@@ -620,3 +629,4 @@ export default function Profile() {
     </MainLayout>
   );
 }
+
