@@ -20,6 +20,27 @@ interface Category {
 export default function Register() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
+  const ROLE_OPTIONS = [
+    {
+      value: "user_dobrovolnik",
+      title: "Dobrovoľník",
+      description: "Chcem pomáhať a ponúkať svoj čas či služby.",
+      icon: "🤝",
+    },
+    {
+      value: "user_firma",
+      title: "Firma",
+      description: "Reprezentujem firmu alebo organizáciu.",
+      icon: "🏢",
+    },
+    {
+      value: "user_senior",
+      title: "Dôchodca",
+      description: "Hľadám príležitosti na aktivity a podporu.",
+      icon: "🧓",
+    },
+  ] as const;
+
   const [form, setForm] = useState({
     name: "",
     surname: "",
@@ -27,6 +48,7 @@ export default function Register() {
     password: "",
     password_confirm: "",
     birthdate: "",
+    role: "",
   });
   const [selectedHobbies, setSelectedHobbies] = useState<number[]>([]);
   const [hobbies, setHobbies] = useState<Hobby[]>([]);
@@ -97,7 +119,7 @@ export default function Register() {
   const handleNextStep = () => {
     setMessage("");
     
-    if (!form.name || !form.surname || !form.email || !form.password || !form.password_confirm || !form.birthdate) {
+    if (!form.name || !form.surname || !form.email || !form.password || !form.password_confirm || !form.birthdate || !form.role) {
       setMessage("Vyplň všetky polia.");
       return;
     }
@@ -316,6 +338,35 @@ export default function Register() {
                   onChange={handleChange}
                   className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-400 focus:outline-none bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100"
                 />
+              </div>
+
+
+              <div>
+                <p className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Vyber si svoju rolu.</p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {ROLE_OPTIONS.map((role) => {
+                    const selected = form.role === role.value;
+                    return (
+                      <button
+                        type="button"
+                        key={role.value}
+                        onClick={() => setForm((prev) => ({ ...prev, role: role.value }))}
+                        className={`text-left rounded-xl border p-3 transition focus:outline-none focus:ring-2 ${
+                          selected
+                            ? "border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 focus:ring-blue-600"
+                            : "border-gray-200 dark:border-gray-700 hover:border-blue-400 focus:ring-blue-400"
+                        }`}
+                      >
+                        <div className="text-2xl mb-1">{role.icon}</div>
+                        <p className="font-semibold">{role.title}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{role.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+                {!form.role && (
+                  <p className="text-xs text-red-500 mt-1">Vyber si svoju rolu.</p>
+                )}
               </div>
 
               <button

@@ -168,10 +168,11 @@ def register_user():
     password = data.get("password")
     password_confirm = data.get("password_confirm")
     birthdate = data.get("birthdate")
+    role = (data.get("role") or "").strip()
     hobbies = data.get("hobbies", [])  # Array ID hobby
 
     # ✅ Kontrola povinných polí
-    if not all([name, surname, email, password, password_confirm, birthdate]):
+    if not all([name, surname, email, password, password_confirm, birthdate, role]):
         return jsonify({"error": "Všetky polia sú povinné."}), 400
 
     # ✅ Kontrola zhody hesiel
@@ -182,6 +183,10 @@ def register_user():
     is_valid, error_msg = validate_password(password)
     if not is_valid:
         return jsonify({"error": error_msg}), 400
+
+    allowed_roles = {"user_senior", "user_dobrovolnik", "user_firma"}
+    if role not in allowed_roles:
+        return jsonify({"error": "Neplatná rola používateľa."}), 400
 
     # ✅ Hash hesla
     hashed_pw = bcrypt.generate_password_hash(password, 12).decode("utf-8")
@@ -205,10 +210,10 @@ def register_user():
         # ✅ Vloženie nového používateľa
         cur.execute(
             """
-            INSERT INTO users (meno, priezvisko, mail, heslo, datum_narodenia)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO users (meno, priezvisko, mail, heslo, datum_narodenia, rola)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            (name, surname, email, hashed_pw, birthdate_formatted)
+            (name, surname, email, hashed_pw, birthdate_formatted, role)
         )
         conn.commit()
         
