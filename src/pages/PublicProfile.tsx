@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import MainLayout from "../layouts/MainLayout";
 import Card from "../components/Card";
-import DefaultAvatar from "../assets/img/teen.jpg";
+import UserRatingsSection from "../components/UserRatingsSection";
 
 type User = {
   id_user: number;
@@ -12,6 +12,7 @@ type User = {
   datum_narodenia?: string | null;
   mesto?: string | null;
   about?: string | null;
+  rola?: string | null;
 };
 
 type Post = {
@@ -25,6 +26,14 @@ type Post = {
 };
 
 type Hobby = { id_hobby: number; nazov: string; id_kategoria: number; kategoria_nazov?: string };
+
+const ROLE_LABELS: Record<string, string> = {
+  user_dobrovolnik: "Dobrovoľník",
+  user_firma: "Firma",
+  user_senior: "Dôchodca",
+};
+
+const formatRole = (role?: string | null) => ROLE_LABELS[role ?? ""] || "Použivateľ";
 
 const onlyDate = (val?: string | null) => {
   if (!val) return "";
@@ -68,7 +77,7 @@ export default function PublicProfile() {
   const [user, setUser] = useState<User | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [hobbies, setHobbies] = useState<Hobby[]>([]);
-  const [avatar, setAvatar] = useState<string>(DefaultAvatar);
+  const [avatar, setAvatar] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,7 +99,7 @@ export default function PublicProfile() {
         const pData = await pRes.json();
         const pItems: Post[] = Array.isArray(pData) ? pData : (pData.items ?? []);
         const hItems: Hobby[] = hRes.ok ? await hRes.json() : [];
-        let avatarUrl = DefaultAvatar;
+        let avatarUrl: string | null = null;
         if (aRes.ok) {
           const a = await aRes.json();
           if (a?.url) avatarUrl = `${baseUrl}${a.url}`;
@@ -113,14 +122,52 @@ export default function PublicProfile() {
   if (loading) return <MainLayout><p className="text-center mt-10">Načítavam profil…</p></MainLayout>;
   if (error || !user) return <MainLayout><p className="text-center mt-10 text-red-500">{error || "Profil neexistuje"}</p></MainLayout>;
 
-  const fullName = `${user.meno} ${user.priezvisko}`.trim();
+  const fullName = `${user.meno ?? ""} ${user.priezvisko ?? ""}`.trim();
+  const initials = (() => {
+    const first = user.meno?.trim()?.[0] ?? "";
+    const last = user.priezvisko?.trim()?.[0] ?? "";
+    const combo = `${first}${last}`.trim();
+    if (combo) return combo.toUpperCase();
+    const fallback = (user.meno ?? user.priezvisko ?? "").trim();
+    return (fallback[0] || "?").toUpperCase();
+  })();
+  const avatarAlt = fullName || user.mail || "Profilová fotka";
+  const roleText = formatRole(user.rola);
+
+  const AvatarCircle = ({
+    sizeClass = "w-32 h-32",
+    textClass = "text-3xl",
+    borderClass = "border-4 border-blue-600 dark:border-indigo-400 shadow",
+  }: {
+    sizeClass?: string;
+    textClass?: string;
+    borderClass?: string;
+  }) => {
+    if (avatar) {
+      return (
+        <img
+          src={avatar}
+          alt={avatarAlt}
+          className={`${sizeClass} rounded-full object-cover ${borderClass}`}
+        />
+      );
+    }
+    return (
+      <div
+        className={`${sizeClass} rounded-full ${borderClass} bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-semibold ${textClass}`}
+        aria-label={avatarAlt}
+      >
+        {initials}
+      </div>
+    );
+  };
 
   return (
     <MainLayout>
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-blue-50 dark:from-gray-900 dark:to-gray-800 text-gray-900 dark:text-gray-100">
         <div className="max-w-4xl mx-auto p-8">
           <div className="bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-8 flex flex-col items-center text-center space-y-4">
-            <img src={avatar} alt="Profilová fotka" className="w-32 h-32 rounded-full object-cover border-4 border-blue-600 dark:border-indigo-400 shadow" />
+            <AvatarCircle />
             <h2 className="text-2xl font-bold">{fullName}</h2>
           </div>
 
@@ -129,6 +176,7 @@ export default function PublicProfile() {
             <div className="bg-white dark:bg-gray-800 shadow-md rounded-2xl p-6">
               <h3 className="text-lg font-semibold mb-3">Základné údaje</h3>
               <ul className="space-y-2 text-gray-700 dark:text-gray-300">
+                <li>Rola: <span className="font-semibold">{roleText}</span></li>
                 <li>E-mail: {user.mail}</li>
                 {user.mesto && <li>Mesto: {user.mesto}</li>}
                 {user.datum_narodenia && <li>Dátum narodenia: {onlyDate(user.datum_narodenia)}</li>}
@@ -175,8 +223,12 @@ export default function PublicProfile() {
               </div>
             )}
           </div>
+
+          <UserRatingsSection userId={userId} currentUserId={currentUserId} baseUrl={baseUrl} className="mt-10" />
         </div>
       </div>
     </MainLayout>
   );
 }
+
+
