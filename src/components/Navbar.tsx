@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 
+type NavUser = { name: string; surname: string; role?: string };
+
 export default function Navbar() {
-  const [user, setUser] = useState<{ name: string; surname: string } | null>(null);
+  const [user, setUser] = useState<NavUser | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -112,7 +114,7 @@ function NavLinks({
   user,
   onClick,
 }: {
-  user: { name: string; surname: string } | null;
+  user: NavUser | null;
   onClick?: () => void;
 }) {
   return (

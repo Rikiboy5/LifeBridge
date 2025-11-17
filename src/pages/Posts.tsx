@@ -8,6 +8,7 @@ interface User {
   id_user?: number;
   name: string;
   surname: string;
+  role?: string; // 👈 pridane
 }
 
 interface Post {
@@ -22,7 +23,15 @@ interface Post {
 
 type PostsApiResp =
   | Post[]
-  | { items: Post[]; pagination?: { page: number; page_size: number; total: number; pages: number } };
+  | {
+      items: Post[];
+      pagination?: {
+        page: number;
+        page_size: number;
+        total: number;
+        pages: number;
+      };
+    };
 
 export default function Posts() {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -101,9 +110,12 @@ export default function Posts() {
           page_size: "50",
           sort: "relevance",
         });
-        const res = await fetch(`http://127.0.0.1:5000/api/posts?${qs.toString()}`, {
-          signal: ctrl.signal,
-        });
+        const res = await fetch(
+          `http://127.0.0.1:5000/api/posts?${qs.toString()}`,
+          {
+            signal: ctrl.signal,
+          }
+        );
         if (!res.ok) throw new Error(await res.text());
         const data: PostsApiResp = await res.json();
         // ignoruj, ak medzičasom používateľ zmenil term a tento response je už „stará“ odpoveď
@@ -135,7 +147,12 @@ export default function Posts() {
     await loadInitial();
   };
 
-  const handleAddPost = async (postData: { title: string; description: string; image?: string | null; category: string; }) => {
+  const handleAddPost = async (postData: {
+    title: string;
+    description: string;
+    image?: string | null;
+    category: string;
+  }) => {
     if (!user) return alert("Musíš byť prihlásený!");
     const payload = { ...postData, user_id: user.id || user.id_user };
     const res = await fetch("http://127.0.0.1:5000/api/posts", {
@@ -143,24 +160,49 @@ export default function Posts() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (res.ok) { setIsCreating(false); await refreshAfterChange(); }
-    else { console.error("Nepodarilo sa vytvoriť príspevok:", await res.text()); }
+    if (res.ok) {
+      setIsCreating(false);
+      await refreshAfterChange();
+    } else {
+      console.error(
+        "Nepodarilo sa vytvoriť príspevok:",
+        await res.text()
+      );
+    }
   };
 
-  const handleEditPost = async (postData: { title: string; description: string; image?: string | null; category: string; }) => {
+  const handleEditPost = async (postData: {
+    title: string;
+    description: string;
+    image?: string | null;
+    category: string;
+  }) => {
     if (!editingPost) return;
     const payload = { ...postData, id_post: editingPost.id_post };
-    const res = await fetch(`http://127.0.0.1:5000/api/posts/${editingPost.id_post}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (res.ok) { setIsEditing(false); setEditingPost(null); await refreshAfterChange(); }
-    else { console.error("Nepodarilo sa upraviť príspevok:", await res.text()); }
+    const res = await fetch(
+      `http://127.0.0.1:5000/api/posts/${editingPost.id_post}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (res.ok) {
+      setIsEditing(false);
+      setEditingPost(null);
+      await refreshAfterChange();
+    } else {
+      console.error(
+        "Nepodarilo sa upraviť príspevok:",
+        await res.text()
+      );
+    }
   };
 
   const handleDeletePost = async (id: number) => {
-    const res = await fetch(`http://127.0.0.1:5000/api/posts/${id}`, { method: "DELETE" });
+    const res = await fetch(`http://127.0.0.1:5000/api/posts/${id}`, {
+      method: "DELETE",
+    });
     if (res.ok) await refreshAfterChange();
   };
 
@@ -168,7 +210,9 @@ export default function Posts() {
     return (
       <MainLayout>
         <div className="max-w-6xl mx-auto p-8">
-          <h1 className="text-3xl font-bold mb-6">📝 Príspevky používateľov</h1>
+          <h1 className="text-3xl font-bold mb-6">
+            📝 Príspevky používateľov
+          </h1>
           <div className="h-10 w-full max-w-xl animate-pulse bg-gray-200 dark:bg-gray-700 rounded-lg" />
           <p className="text-center mt-10">Načítavam príspevky…</p>
         </div>
@@ -179,7 +223,9 @@ export default function Posts() {
     return (
       <MainLayout>
         <div className="max-w-6xl mx-auto p-8">
-          <h1 className="text-3xl font-bold mb-6">📝 Príspevky používateľov</h1>
+          <h1 className="text-3xl font-bold mb-6">
+            📝 Príspevky používateľov
+          </h1>
           <div className="w-full sm:w-96">
             <input
               value={q}
@@ -212,7 +258,9 @@ export default function Posts() {
               />
               <div className="text-xs text-gray-500 mt-1">
                 {q.trim()
-                  ? (searching ? "Hľadám…" : `Výsledky: ${posts.length}`)
+                  ? searching
+                    ? "Hľadám…"
+                    : `Výsledky: ${posts.length}`
                   : `Počet príspevkov: ${posts.length}`}
               </div>
             </div>
@@ -231,7 +279,9 @@ export default function Posts() {
         {/* LIST */}
         {posts.length === 0 ? (
           <p className="text-gray-600 dark:text-gray-400 text-center">
-            {q.trim() ? "Nenašli sa žiadne príspevky." : "Zatiaľ žiadne príspevky."}
+            {q.trim()
+              ? "Nenašli sa žiadne príspevky."
+              : "Zatiaľ žiadne príspevky."}
           </p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -244,22 +294,28 @@ export default function Posts() {
                   author={`${post.name} ${post.surname}`}
                   category={post.category}
                 />
-                {user && `${user.name} ${user.surname}` === `${post.name} ${post.surname}` && (
-                  <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition">
-                    <button
-                      onClick={() => { setEditingPost(post); setIsEditing(true); }}
-                      className="bg-yellow-500 hover:bg-yellow-600 text-white text-sm px-2 py-1 rounded-md"
-                    >
-                      🖊️
-                    </button>
-                    <button
-                      onClick={() => handleDeletePost(post.id_post)}
-                      className="bg-red-500 hover:bg-red-600 text-white text-sm px-2 py-1 rounded-md"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                )}
+                {user &&
+                  (user.role === "admin" ||
+                    `${user.name} ${user.surname}` ===
+                      `${post.name} ${post.surname}`) && (
+                    <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                      <button
+                        onClick={() => {
+                          setEditingPost(post);
+                          setIsEditing(true);
+                        }}
+                        className="bg-yellow-500 hover:bg-yellow-600 text-white text-sm px-2 py-1 rounded-md"
+                      >
+                        🖊️
+                      </button>
+                      <button
+                        onClick={() => handleDeletePost(post.id_post)}
+                        className="bg-red-500 hover:bg-red-600 text-white text-sm px-2 py-1 rounded-md"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  )}
               </div>
             ))}
           </div>
@@ -267,11 +323,17 @@ export default function Posts() {
 
         {/* FORMULÁRE */}
         {isCreating && (
-          <CardCreator onClose={() => setIsCreating(false)} onSave={handleAddPost} />
+          <CardCreator
+            onClose={() => setIsCreating(false)}
+            onSave={handleAddPost}
+          />
         )}
         {isEditing && editingPost && (
           <CardCreator
-            onClose={() => { setIsEditing(false); setEditingPost(null); }}
+            onClose={() => {
+              setIsEditing(false);
+              setEditingPost(null);
+            }}
             onSave={handleEditPost}
             initialData={editingPost}
           />
