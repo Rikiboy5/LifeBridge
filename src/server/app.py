@@ -83,7 +83,7 @@ def validate_password(password):
     - Min 8 znakov
     - Aspoň 1 veľké písmeno
     - Aspoň 1 malé písmeno
-    - Aspoň 1 číslo
+    - Aspoť 1 číslo
     - Aspoň 1 špeciálny znak
     """
     if len(password) < 8:
@@ -266,7 +266,7 @@ def login_user():
                 "surname": user["priezvisko"],
                 "email": user["mail"],
                 "birthdate": user["datum_narodenia"],
-                "role": user.get("rola") or "user",
+                "role": user.get("rola") or "user",   # 👈 dôležité
             }
         }), 200
     finally:
@@ -274,12 +274,13 @@ def login_user():
         conn.close()
 
 # ==========================================
-# 👥 POUŽÍVATELIA – LIST
+# 👥 POUŽÍVATELIA – LIST (s ratingmi)
 # ==========================================
 @app.get("/api/users")
 def get_users():
     q = request.args.get("q", "").strip()
-    sort = request.args.get("sort", "id_desc").lower()  # id_desc | id_asc | name_asc | name_desc | relevance
+    sort = request.args.get("sort", "id_desc").lower()  # id_desc | id_asc | name_asc | name_desc | rating_desc | rating_asc | relevance
+    role_filter = request.args.get("role", "").strip()
 
     # stránkovanie
     try:
@@ -292,12 +293,14 @@ def get_users():
         page_size = 50
     offset = (page - 1) * page_size
 
-    # default sort (keď nie je q)
-    sort_sql = {
+    # základné sortovanie podľa usera / ratingu
+    base_sort_sql = {
         "id_desc": "u.id_user DESC",
         "id_asc": "u.id_user ASC",
         "name_asc": "u.meno ASC, u.priezvisko ASC",
         "name_desc": "u.meno DESC, u.priezvisko DESC",
+        "rating_desc": "r.avg_rating IS NULL, r.avg_rating DESC, r.rating_count DESC, u.id_user DESC",
+        "rating_asc": "r.avg_rating IS NULL, r.avg_rating ASC, r.rating_count DESC, u.id_user DESC",
     }.get(sort, "u.id_user DESC")
 
     conn = get_conn()
@@ -308,13 +311,22 @@ def get_users():
         params = []
 
         score_sql = "0"  # default (bez q)
+        score_params = []
+
+        allowed_roles = {"user_dobrovolnik", "user_firma", "user_senior"}
+        if role_filter and role_filter in allowed_roles:
+            where.append("u.rola = %s")
+            params.append(role_filter)
 
         if q:
             like_any = f"%{q}%"
             like_prefix = f"{q}%"
             like_fullname_prefix = f"{q}%"
 
-            where.append("(u.meno LIKE %s OR u.priezvisko LIKE %s OR u.mail LIKE %s OR CONCAT(u.meno,' ',u.priezvisko) LIKE %s)")
+            where.append(
+                "(u.meno LIKE %s OR u.priezvisko LIKE %s OR u.mail LIKE %s OR "
+                "CONCAT(u.meno,' ',u.priezvisko) LIKE %s)"
+            )
             params += [like_any, like_any, like_any, like_any]
 
             score_sql = """
@@ -334,22 +346,44 @@ def get_users():
                 like_any, like_any, like_any
             ]
 
-            if sort in ("relevance", "id_desc", "id_asc", "name_asc", "name_desc"):
-                sort_sql = f"score DESC, u.meno ASC, u.priezvisko ASC"
-
         where_sql = " AND ".join(where)
 
+        # ak je fulltext (q), ale sort nie je rating_desc/asc, triedime primárne podľa relevancie
+        if q:
+            if sort in ("rating_desc", "rating_asc"):
+                sort_sql = base_sort_sql
+            else:
+                sort_sql = "score DESC, u.meno ASC, u.priezvisko ASC"
+        else:
+            sort_sql = base_sort_sql
+
         # total
-        cur.execute(f"SELECT COUNT(*) AS total FROM users u WHERE {where_sql}", params)
+        cur.execute(
+            f"SELECT COUNT(*) AS total FROM users u WHERE {where_sql}",
+            params,
+        )
         total = cur.fetchone()["total"]
 
-        # data
+        # data (JOIN na agregované ratingy)
         if q:
             cur.execute(
                 f"""
-                SELECT u.id_user, u.meno, u.priezvisko, u.mail,
-                       {score_sql} AS score
+                SELECT 
+                    u.id_user,
+                    u.meno,
+                    u.priezvisko,
+                    u.mail,
+                    r.avg_rating,
+                    r.rating_count,
+                    {score_sql} AS score
                 FROM users u
+                LEFT JOIN (
+                    SELECT user_id,
+                           AVG(rating) AS avg_rating,
+                           COUNT(*)    AS rating_count
+                    FROM user_ratings
+                    GROUP BY user_id
+                ) r ON r.user_id = u.id_user
                 WHERE {where_sql}
                 ORDER BY {sort_sql}
                 LIMIT %s OFFSET %s
@@ -359,8 +393,21 @@ def get_users():
         else:
             cur.execute(
                 f"""
-                SELECT u.id_user, u.meno, u.priezvisko, u.mail
+                SELECT 
+                    u.id_user,
+                    u.meno,
+                    u.priezvisko,
+                    u.mail,
+                    r.avg_rating,
+                    r.rating_count
                 FROM users u
+                LEFT JOIN (
+                    SELECT user_id,
+                           AVG(rating) AS avg_rating,
+                           COUNT(*)    AS rating_count
+                    FROM user_ratings
+                    GROUP BY user_id
+                ) r ON r.user_id = u.id_user
                 WHERE {where_sql}
                 ORDER BY {sort_sql}
                 LIMIT %s OFFSET %s
@@ -368,7 +415,7 @@ def get_users():
                 params + [page_size, offset],
             )
 
-        rows = cur.fetchall()
+        rows = [_normalize_user_rating_fields(dict(row)) for row in cur.fetchall()]
 
         if not q:
             return jsonify(rows), 200
@@ -421,6 +468,275 @@ def delete_user(user_id: int):
         conn.close()
 
 # ==========================================
+# HODNOTENIA POUZIVATELOV
+# ==========================================
+
+def _serialize_rating_row(row):
+    if not row:
+        return None
+    created_at = row.get("created_at")
+    if isinstance(created_at, datetime):
+        created_at_str = created_at.isoformat()
+    else:
+        created_at_str = created_at
+    first = (row.get("meno") or "").strip()
+    last = (row.get("priezvisko") or "").strip()
+    full_name = " ".join(part for part in [first, last] if part).strip()
+    return {
+        "id_rating": row.get("id_rating"),
+        "user_id": row.get("user_id"),
+        "rated_by_user_id": row.get("rated_by_user_id"),
+        "rating": row.get("rating"),
+        "comment": row.get("comment"),
+        "created_at": created_at_str,
+        "rated_by_name": full_name or None,
+    }
+
+
+def _normalize_user_rating_fields(row):
+    if not row:
+        return row
+    if "avg_rating" in row:
+        val = row.get("avg_rating")
+        if val is None:
+            row["avg_rating"] = None
+        else:
+            try:
+                row["avg_rating"] = float(val)
+            except (TypeError, ValueError):
+                row["avg_rating"] = None
+    if "rating_count" in row:
+        val = row.get("rating_count")
+        if val is None:
+            row["rating_count"] = 0
+        else:
+            try:
+                row["rating_count"] = int(val)
+            except (TypeError, ValueError):
+                row["rating_count"] = 0
+    return row
+
+
+@app.get("/api/users/<int:user_id>/ratings")
+def get_user_ratings(user_id):
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+
+    limit_arg = request.args.get("limit")
+    try:
+        default_page_size = int(limit_arg) if limit_arg is not None else 10
+    except (TypeError, ValueError):
+        default_page_size = 10
+
+    try:
+        page_size = int(request.args.get("page_size", default_page_size))
+    except (TypeError, ValueError):
+        page_size = default_page_size
+    page_size = max(1, min(50, page_size))
+    offset = (page - 1) * page_size
+
+    rated_by_param = request.args.get("rated_by")
+    try:
+        rated_by_user_id = int(rated_by_param) if rated_by_param is not None else None
+    except (TypeError, ValueError):
+        rated_by_user_id = None
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT COUNT(*) AS total, AVG(rating) AS avg_rating
+            FROM user_ratings
+            WHERE user_id = %s
+        """, (user_id,))
+        stats_row = cur.fetchone() or {"total": 0, "avg_rating": None}
+        avg_rating = stats_row.get("avg_rating")
+        avg_value = float(avg_rating) if avg_rating is not None else None
+        total = int(stats_row.get("total") or 0)
+
+        cur.execute("""
+            SELECT r.id_rating, r.user_id, r.rated_by_user_id, r.rating, r.comment, r.created_at,
+                   u.meno, u.priezvisko
+            FROM user_ratings r
+            LEFT JOIN users u ON u.id_user = r.rated_by_user_id
+            WHERE r.user_id = %s
+            ORDER BY r.created_at DESC
+            LIMIT %s OFFSET %s
+        """, (user_id, page_size, offset))
+        rows = [_normalize_user_rating_fields(dict(row)) for row in cur.fetchall()]
+        items = [item for item in (_serialize_rating_row(row) for row in rows) if item]
+
+        my_rating = None
+        if rated_by_user_id:
+            cur.execute("""
+                SELECT r.id_rating, r.user_id, r.rated_by_user_id, r.rating, r.comment, r.created_at,
+                       u.meno, u.priezvisko
+                FROM user_ratings r
+                LEFT JOIN users u ON u.id_user = r.rated_by_user_id
+                WHERE r.user_id = %s AND r.rated_by_user_id = %s
+                LIMIT 1
+            """, (user_id, rated_by_user_id))
+            my_rating = _serialize_rating_row(cur.fetchone())
+
+        total_pages = (total + page_size - 1) // page_size
+
+        return jsonify({
+            "items": items,
+            "stats": {
+                "average": avg_value,
+                "count": total,
+            },
+            "my_rating": my_rating,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "pages": total_pages,
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"Chyba pri nacitani hodnoteni: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/users/top-rated")
+def get_top_rated_users():
+    try:
+        limit = max(1, min(20, int(request.args.get("limit", 6))))
+    except (TypeError, ValueError):
+        limit = 5
+    try:
+        days = max(1, min(90, int(request.args.get("days", 7))))
+    except (TypeError, ValueError):
+        days = 7
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT u.id_user,
+                   u.meno,
+                   u.priezvisko,
+                   u.mail,
+                   u.rola,
+                   AVG(r.rating) AS avg_rating,
+                   COUNT(*) AS rating_count
+            FROM user_ratings r
+            JOIN users u ON u.id_user = r.user_id
+            WHERE r.created_at >= NOW() - INTERVAL %s DAY
+              AND u.soft_del = 0
+            GROUP BY u.id_user, u.meno, u.priezvisko, u.mail, u.rola
+            HAVING rating_count > 0
+            ORDER BY avg_rating DESC, rating_count DESC, u.id_user DESC
+            LIMIT %s
+            """,
+            (days, limit),
+        )
+        rows = [_normalize_user_rating_fields(row) for row in cur.fetchall()]
+        return jsonify(rows), 200
+    except Exception as e:
+        return jsonify({"error": f"Chyba pri nacitani hodnoteni: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.post("/api/users/<int:user_id>/ratings")
+def upsert_user_rating(user_id):
+    data = request.get_json(force=True)
+    rated_by_user_id = data.get("rated_by_user_id")
+    rating_value = data.get("rating")
+    comment = (data.get("comment") or "").strip()
+
+    try:
+        rated_by_user_id = int(rated_by_user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Neplatne ID hodnotiaceho pouzivatela."}), 400
+
+    if rated_by_user_id == user_id:
+        return jsonify({"error": "Pouzivatel sa nemoze hodnotit sam."}), 400
+
+    try:
+        rating_value = int(rating_value)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Neplatna hodnota ratingu."}), 400
+
+    if rating_value < 1 or rating_value > 5:
+        return jsonify({"error": "Hodnotenie musi byt v rozsahu 1 az 5."}), 400
+
+    if not comment:
+        comment = None
+    elif len(comment) > 1000:
+        comment = comment[:1000]
+
+    conn = get_conn()
+    cur = None
+    write_cur = None
+    detail_cur = None
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT id_user FROM users WHERE id_user IN (%s, %s)", (user_id, rated_by_user_id))
+        ids = {row["id_user"] for row in cur.fetchall()}
+        if user_id not in ids:
+            return jsonify({"error": "Hodnoteny pouzivatel neexistuje."}), 404
+        if rated_by_user_id not in ids:
+            return jsonify({"error": "Hodnotiaci pouzivatel neexistuje."}), 400
+
+        cur.execute("""
+            SELECT id_rating
+            FROM user_ratings
+            WHERE user_id = %s AND rated_by_user_id = %s
+        """, (user_id, rated_by_user_id))
+        existing = cur.fetchone()
+        cur.close()
+        cur = None
+
+        write_cur = conn.cursor()
+        if existing:
+            write_cur.execute("""
+                UPDATE user_ratings
+                SET rating = %s, comment = %s, created_at = NOW()
+                WHERE id_rating = %s
+            """, (rating_value, comment, existing["id_rating"]))
+            status_code = 200
+        else:
+            write_cur.execute("""
+                INSERT INTO user_ratings (user_id, rated_by_user_id, rating, comment)
+                VALUES (%s, %s, %s, %s)
+            """, (user_id, rated_by_user_id, rating_value, comment))
+            status_code = 201
+        conn.commit()
+        write_cur.close()
+        write_cur = None
+
+        detail_cur = conn.cursor(dictionary=True)
+        detail_cur.execute("""
+            SELECT r.id_rating, r.user_id, r.rated_by_user_id, r.rating, r.comment, r.created_at,
+                   u.meno, u.priezvisko
+            FROM user_ratings r
+            LEFT JOIN users u ON u.id_user = r.rated_by_user_id
+            WHERE r.user_id = %s AND r.rated_by_user_id = %s
+            LIMIT 1
+        """, (user_id, rated_by_user_id))
+        saved = _serialize_rating_row(detail_cur.fetchone())
+
+        return jsonify({"message": "Hodnotenie ulozene.", "rating": saved}), status_code
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"Chyba pri ukladani hodnotenia: {str(e)}"}), 500
+    finally:
+        if cur:
+            cur.close()
+        if write_cur:
+            write_cur.close()
+        if detail_cur:
+            detail_cur.close()
+        conn.close()
+
+# ==========================================
 # 📝 PRÍSPEVKY
 # ==========================================
 
@@ -443,7 +759,7 @@ def get_posts():
 
     sort_sql = {
         "id_desc": "p.id_post DESC",
-        "id_asc":  "p.id_post ASC",
+        "id_asc": "p.id_post ASC",
         "title_asc": "p.title ASC",
         "title_desc": "p.title DESC",
     }.get(sort, "p.id_post DESC")
@@ -535,7 +851,6 @@ def get_posts():
     finally:
         cur.close()
         conn.close()
-
 
 @app.post("/api/posts")
 def create_post():
@@ -647,6 +962,7 @@ def _validate_profile_payload(data: dict):
     if not data or not any(k in data for k in ALLOWED_PROFILE_FIELDS):
         return False, "Nie je čo aktualizovať."
 
+    # dĺžky a formáty
     if "meno" in data and (not data["meno"] or len(data["meno"]) > 100):
         return False, "Meno je povinné a môže mať max 100 znakov."
     if "priezvisko" in data and (not data["priezvisko"] or len(data["priezvisko"]) > 100):
@@ -657,17 +973,19 @@ def _validate_profile_payload(data: dict):
         return False, "Text „O mne“ môže mať max 5000 znakov."
     if "datum_narodenia" in data and data["datum_narodenia"]:
         try:
+            # očakáva sa 'YYYY-MM-DD'
             datetime.strptime(data["datum_narodenia"], "%Y-%m-%d")
         except Exception:
             return False, "Neplatný formát dátumu (použi YYYY-MM-DD)."
 
+    # nepovolené polia (napr. mail, heslo, rola) – ak by prišli, odmietneme
     forbidden = set(data.keys()) - ALLOWED_PROFILE_FIELDS
     if forbidden:
         return False, f"Nasledujúce polia nie je možné meniť: {', '.join(sorted(forbidden))}"
 
     return True, ""
 
-# Avatar endpoints
+# Avatar (no DB) endpoints
 @app.post("/api/profile/<int:user_id>/avatar")
 def upload_profile_avatar(user_id: int):
     file = request.files.get("file")
@@ -714,6 +1032,7 @@ def serve_avatar_file(filename: str):
 
 @app.get("/api/profile/<int:user_id>")
 def get_profile(user_id: int):
+    """Načíta detaily profilu pre daného používateľa (bez hesla)."""
     conn = get_conn()
     try:
         cur = conn.cursor(dictionary=True)
@@ -722,7 +1041,7 @@ def get_profile(user_id: int):
                 u.id_user, u.meno, u.priezvisko, u.mail, u.datum_narodenia,
                 u.mesto, u.about, u.rola, u.created_at
             FROM users u
-            WHERE u.id_user = %s AND u.soft_del = 0
+            WHERE u.id_user = %s
         """, (user_id,))
         row = cur.fetchone()
         if not row:
@@ -732,9 +1051,13 @@ def get_profile(user_id: int):
         cur.close()
         conn.close()
 
-
 @app.put("/api/profile/<int:user_id>")
 def update_profile(user_id: int):
+    """
+    Aktualizuje profil prihláseného používateľa.
+    Meniteľné: meno, priezvisko, datum_narodenia, mesto, about
+    Nemeníme: mail, heslo, rola, soft_del, atď.
+    """
     data = request.get_json(force=True) or {}
     ok, msg = _validate_profile_payload(data)
     if not ok:
@@ -754,11 +1077,10 @@ def update_profile(user_id: int):
     try:
         cur = conn.cursor()
         params.append(user_id)
-        cur.execute(f"""
-            UPDATE users
-            SET {', '.join(sets)}
-            WHERE id_user = %s AND soft_del = 0
-        """, tuple(params))
+        cur.execute(
+            f"UPDATE users SET {', '.join(sets)} WHERE id_user = %s",
+            tuple(params),
+        )
         if cur.rowcount == 0:
             return jsonify({"error": "Používateľ neexistuje alebo je zmazaný."}), 404
         conn.commit()
@@ -769,8 +1091,8 @@ def update_profile(user_id: int):
         cur.close()
         conn.close()
 
+    # po úspešnom update vrátime aktualizovaný profil
     return get_profile(user_id)
-
 
 # ==========================================
 # 🧩 PROFIL – HOBBY GET/PUT
@@ -876,7 +1198,6 @@ def list_activities():
             "total": total, "pages": (total + page_size - 1)//page_size
         }})
     finally:
-        cur.close()
         conn.close()
 
 
@@ -909,14 +1230,12 @@ def create_activity():
         """, (title, description, image_url, capacity, lat, lng, user_id))
         activity_id = cur.lastrowid
         conn.commit()
-        cur = conn.cursor()
         cur.execute("SELECT * FROM activities WHERE id_activity = %s", (activity_id,))
         row = cur.fetchone()
         keys = [desc[0] for desc in cur.description]
         activity = dict(zip(keys, row))
         return jsonify(activity)
     finally:
-        cur.close()
         conn.close()
 
 
@@ -943,6 +1262,7 @@ def signup_activity(activity_id):
         if cur.fetchone() is not None:
             return jsonify({"error": "Už ste prihlásený na túto aktivitu."}), 400
 
+        # Vytvor prihlásenie + zvýš počet účastníkov
         cur.execute("INSERT INTO activity_signups (activity_id, user_id) VALUES (%s, %s)", (activity_id, user_id))
         cur.execute("UPDATE activities SET attendees_count = attendees_count + 1 WHERE id_activity = %s", (activity_id,))
         conn.commit()
@@ -951,7 +1271,6 @@ def signup_activity(activity_id):
         attendees_count = cur.fetchone()[0]
         return jsonify({"attendees_count": attendees_count})
     finally:
-        cur.close()
         conn.close()
 
 
@@ -971,7 +1290,6 @@ def cancel_signup(activity_id):
         conn.commit()
         return jsonify({"message": "Úspešne odhlásený"})
     finally:
-        cur.close()
         conn.close()
 
 

@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import ManImage from "../assets/img/teen.jpg";
 import CardCreator from "../components/CardCreator";
 import Card from "../components/Card";
+import UserRatingsSection from "../components/UserRatingsSection";
 import MainLayout from "../layouts/MainLayout";
 
 type User = {
@@ -27,14 +27,34 @@ type Post = {
   surname: string;
 };
 
-// helper: normalize to YYYY-MM-DD (robustly handle various formats)
+type Hobby = {
+  id_hobby: number;
+  nazov: string;
+  id_kategoria: number;
+  kategoria_nazov?: string;
+};
+type Category = {
+  id_kategoria: number;
+  nazov: string;
+  ikona?: string;
+  pocet_hobby?: number;
+};
+
+const ROLE_LABELS: Record<string, string> = {
+  user_dobrovolnik: "Dobrovoľník",
+  user_firma: "Firma",
+  user_senior: "Dôchodca",
+};
+
+const formatRole = (role?: string | null) =>
+  ROLE_LABELS[role ?? ""] || "Používateľ";
+
+// helper: normalize to YYYY-MM-DD
 const onlyDate = (val: string | null | undefined): string => {
   if (!val) return "";
   const s = String(val).trim();
-  // direct ISO or MySQL date/datetime
   const m = s.match(/^\d{4}-\d{2}-\d{2}/);
   if (m) return m[0];
-  // try Date parsing and format with local tz (avoid UTC shift)
   const d = new Date(s);
   if (!isNaN(d.getTime())) {
     const pad = (n: number) => String(n).padStart(2, "0");
@@ -52,19 +72,6 @@ export default function Profile() {
   const [saving, setSaving] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
 
-  type Hobby = {
-    id_hobby: number;
-    nazov: string;
-    id_kategoria: number;
-    kategoria_nazov?: string;
-  };
-  type Category = {
-    id_kategoria: number;
-    nazov: string;
-    ikona?: string;
-    pocet_hobby?: number;
-  };
-
   const [hobbies, setHobbies] = useState<Hobby[]>([]);
   const [selectedHobbyIds, setSelectedHobbyIds] = useState<number[]>([]);
   const [editingHobbies, setEditingHobbies] = useState(false);
@@ -72,6 +79,7 @@ export default function Profile() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
   const [avatarSrc, setAvatarSrc] = useState<string | null>(null);
+
   const [form, setForm] = useState({
     meno: "",
     priezvisko: "",
@@ -83,8 +91,8 @@ export default function Profile() {
   const baseUrl =
     (import.meta as any).env?.VITE_API_URL ?? "http://127.0.0.1:5000";
 
-  // prihlásený používateľ (ID) z localStorage
-  const currentUserId = useMemo(() => {
+  // prihlásený používateľ z localStorage
+  const currentUserId = useMemo<number | null>(() => {
     try {
       const raw = localStorage.getItem("user");
       if (!raw) return null;
@@ -95,24 +103,22 @@ export default function Profile() {
     }
   }, []);
 
-  // rola prihláseného používateľa (ak ju FE dostáva z /api/login)
-  const currentUserRole = useMemo(() => {
+  const currentUserRole = useMemo<string | undefined>(() => {
     try {
       const raw = localStorage.getItem("user");
       if (!raw) return undefined;
       const u = JSON.parse(raw);
-      return u?.role as string | undefined;
+      return u?.role;
     } catch {
       return undefined;
     }
   }, []);
 
-  // URL parametre – /user/:id (admin) alebo /profil (bez id)
   const { id } = useParams<{ id?: string }>();
   const navigate = useNavigate();
 
-  // koho profil práve pozeráme: ak je :id v URL → to, inak prihlásený user
-  const viewedUserId = useMemo(() => {
+  // koho profil pozeráme: /user/:id alebo vlastný profil (/profil)
+  const viewedUserId = useMemo<number | null>(() => {
     if (id) {
       const parsed = Number(id);
       if (!Number.isNaN(parsed)) return parsed;
@@ -121,7 +127,7 @@ export default function Profile() {
   }, [id, currentUserId]);
 
   const viewerIsAdmin =
-    currentUserRole === "admin" || currentUserId === 1 /* fallback */;
+    currentUserRole === "admin" || currentUserId === 1 /* superadmin */;
   const isOwnProfile =
     !!currentUserId && !!viewedUserId && currentUserId === viewedUserId;
   const canEditProfile = !!profile && (isOwnProfile || viewerIsAdmin);
@@ -132,7 +138,7 @@ export default function Profile() {
     fetch(`${baseUrl}/api/profile/${viewedUserId}`)
       .then((r) => r.json())
       .then((data) => {
-        const normalized = {
+        const normalized: User = {
           ...data,
           datum_narodenia: onlyDate(data.datum_narodenia) || null,
         };
@@ -148,7 +154,7 @@ export default function Profile() {
       .catch((e) => console.error("Chyba pri načítaní profilu:", e));
   }, [viewedUserId, baseUrl]);
 
-  // načítaj všetky hobby, kategórie a hobby daného používateľa
+  // načítaj hobby + kategórie + hobby konkrétneho používateľa
   useEffect(() => {
     if (!viewedUserId) return;
     (async () => {
@@ -183,11 +189,14 @@ export default function Profile() {
     if (!viewedUserId || !canEditProfile) return;
     setSavingHobbies(true);
     try {
-      const res = await fetch(`${baseUrl}/api/profile/${viewedUserId}/hobbies`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hobbies: selectedHobbyIds }),
-      });
+      const res = await fetch(
+        `${baseUrl}/api/profile/${viewedUserId}/hobbies`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hobbies: selectedHobbyIds }),
+        }
+      );
       if (!res.ok) {
         alert(await res.text());
         return;
@@ -220,7 +229,6 @@ export default function Profile() {
     fetchMyPosts();
   }, [viewedUserId, baseUrl]);
 
-  // ensure posts load on first visit once id is known
   const postsLoadedRef = useRef(false);
   useEffect(() => {
     if (viewedUserId && !postsLoadedRef.current) {
@@ -229,7 +237,7 @@ export default function Profile() {
     }
   }, [viewedUserId]);
 
-  // načítaj avatar (ak existuje)
+  // načítaj avatar
   useEffect(() => {
     if (!viewedUserId) return;
     (async () => {
@@ -249,15 +257,59 @@ export default function Profile() {
     })();
   }, [viewedUserId, baseUrl]);
 
-  const fullName = profile
-    ? `${profile.meno} ${profile.priezvisko}`.trim()
-    : "";
+  const fullName = useMemo(() => {
+    if (!profile) return "";
+    return `${profile.meno ?? ""} ${profile.priezvisko ?? ""}`.trim();
+  }, [profile?.meno, profile?.priezvisko]);
+
+  const roleText = useMemo(
+    () => formatRole(profile?.rola),
+    [profile?.rola]
+  );
+
+  const initials = useMemo(() => {
+    const first = profile?.meno?.trim()?.[0] ?? "";
+    const last = profile?.priezvisko?.trim()?.[0] ?? "";
+    const combo = `${first}${last}`.trim();
+    if (combo) return combo.toUpperCase();
+    const fallback = (profile?.meno ?? profile?.priezvisko ?? "").trim();
+    return (fallback[0] || "?").toUpperCase();
+  }, [profile?.meno, profile?.priezvisko]);
+
+  const avatarAlt = fullName || profile?.mail || "Profilová fotka";
+
+  const AvatarCircle = ({
+    sizeClass = "w-32 h-32",
+    textClass = "text-3xl",
+    borderClass = "border-4 border-blue-600 dark:border-indigo-400 shadow",
+  }: {
+    sizeClass?: string;
+    textClass?: string;
+    borderClass?: string;
+  }) => {
+    if (avatarSrc) {
+      return (
+        <img
+          src={avatarSrc}
+          alt={avatarAlt}
+          className={`${sizeClass} rounded-full object-cover ${borderClass}`}
+        />
+      );
+    }
+    return (
+      <div
+        className={`${sizeClass} rounded-full ${borderClass} bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-semibold ${textClass}`}
+        aria-label={avatarAlt}
+      >
+        {initials}
+      </div>
+    );
+  };
 
   const handleSave = async () => {
     if (!profile || !canEditProfile) return;
     setSaving(true);
     try {
-      // pošli len polia, ktoré sa reálne zmenili (partial update)
       const changed: Record<string, any> = {};
       const orig = profile;
       const cmp = (v: any) => (v == null ? "" : String(v));
@@ -265,7 +317,10 @@ export default function Profile() {
       if (cmp(form.meno) !== cmp(orig.meno)) changed.meno = form.meno;
       if (cmp(form.priezvisko) !== cmp(orig.priezvisko))
         changed.priezvisko = form.priezvisko;
-      if (cmp(form.datum_narodenia) !== cmp(onlyDate(orig.datum_narodenia)))
+      if (
+        cmp(form.datum_narodenia) !==
+        cmp(onlyDate(orig.datum_narodenia))
+      )
         changed.datum_narodenia = form.datum_narodenia || null;
       if (cmp(form.mesto) !== cmp(orig.mesto))
         changed.mesto = form.mesto || null;
@@ -286,7 +341,7 @@ export default function Profile() {
       if (!res.ok) {
         alert(data?.error || "Nepodarilo sa uložiť profil.");
       } else {
-        const normalized = {
+        const normalized: User = {
           ...data,
           datum_narodenia: onlyDate(data.datum_narodenia) || null,
         };
@@ -301,7 +356,7 @@ export default function Profile() {
   };
 
   const handleDeleteProfile = async () => {
-    if (!profile || !viewerIsAdmin) return;
+    if (!profile || !viewerIsAdmin || isOwnProfile) return;
     if (
       !window.confirm(
         `Naozaj chceš zmazať profil používateľa ${profile.meno} ${profile.priezvisko}?`
@@ -325,7 +380,6 @@ export default function Profile() {
     }
   };
 
-  // vytvorenie nového príspevku (na profil používateľa, ktorého pozeráme)
   const handleAddPost = async (postData: {
     title: string;
     description: string;
@@ -398,20 +452,36 @@ export default function Profile() {
     }
   };
 
+  // keď nie je koho zobraziť (napr. neprihlásený na /profil)
+  if (!viewedUserId) {
+    return (
+      <MainLayout>
+        <div className="max-w-xl mx-auto p-8">
+          <p className="text-center text-gray-500">
+            Najprv sa prihlás alebo zadaj platný profil.
+          </p>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  const postsTitle = isOwnProfile ? "Moje príspevky" : "Príspevky používateľa";
+
   return (
     <MainLayout>
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-blue-50 dark:from-gray-900 dark:to-gray-800 text-gray-900 dark:text-gray-100">
         <div className="max-w-4xl mx-auto p-8">
           {/* Profilová hlavička */}
           <div className="bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-8 flex flex-col items-center text-center space-y-4">
-            <img
-              src={avatarSrc || ManImage}
-              alt="Profilová fotka"
-              className="w-32 h-32 rounded-full object-cover border-4 border-blue-600 dark:border-indigo-400 shadow"
-            />
+            <AvatarCircle />
             <h2 className="text-2xl font-bold">{fullName}</h2>
 
-            <div className="flex flex-col items-center gap-2">
+            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+              <span className="font-semibold">{roleText}</span>
+              {profile?.mail && <span>• {profile.mail}</span>}
+            </div>
+
+            <div className="flex flex-wrap gap-3 justify-center mt-2">
               <button
                 onClick={() => canEditProfile && setIsEditing(true)}
                 className={`px-5 py-2 rounded-lg transition ${
@@ -427,7 +497,7 @@ export default function Profile() {
               {viewerIsAdmin && profile && !isOwnProfile && (
                 <button
                   onClick={handleDeleteProfile}
-                  className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 transition text-sm"
+                  className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition text-sm"
                 >
                   Zmazať profil
                 </button>
@@ -435,7 +505,7 @@ export default function Profile() {
             </div>
           </div>
 
-          {/* Záľuby (ako pri registrácii) */}
+          {/* Záľuby */}
           <div className="mt-6 bg-white dark:bg-gray-800 shadow-md rounded-2xl p-6">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-lg font-semibold">Záľuby</h3>
@@ -522,21 +592,23 @@ export default function Profile() {
                   ))}
                 </div>
 
-                <div className="mt-3 flex gap-2 justify-end">
-                  <button
-                    onClick={() => setEditingHobbies(false)}
-                    className="px-3 py-1 rounded-md border"
-                  >
-                    Zrušiť
-                  </button>
-                  <button
-                    onClick={handleSaveHobbies}
-                    disabled={savingHobbies}
-                    className="px-4 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
-                  >
-                    {savingHobbies ? "Ukladám…" : "Uložiť záľuby"}
-                  </button>
-                </div>
+                {canEditProfile && (
+                  <div className="mt-3 flex gap-2 justify-end">
+                    <button
+                      onClick={() => setEditingHobbies(false)}
+                      className="px-3 py-1 rounded-md border"
+                    >
+                      Zrušiť
+                    </button>
+                    <button
+                      onClick={handleSaveHobbies}
+                      disabled={savingHobbies}
+                      className="px-4 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+                    >
+                      {savingHobbies ? "Ukladám…" : "Uložiť záľuby"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -544,8 +616,13 @@ export default function Profile() {
           {/* Sekcia s informáciami */}
           <div className="mt-10 grid md:grid-cols-2 gap-6">
             <div className="bg-white dark:bg-gray-800 shadow-md rounded-2xl p-6">
-              <h3 className="text-lg font-semibold mb-3">Základné údaje</h3>
+              <h3 className="text-lg font-semibold mb-3">
+                Základné údaje
+              </h3>
               <ul className="space-y-2 text-gray-700 dark:text-gray-300">
+                <li>
+                  Rola: <span className="font-semibold">{roleText}</span>
+                </li>
                 <li>Mesto: {profile?.mesto?.trim() || "Neuvedené"}</li>
                 <li>
                   Dátum narodenia:{" "}
@@ -570,7 +647,7 @@ export default function Profile() {
           {/* Príspevky používateľa */}
           <div className="mt-10 bg-white dark:bg-gray-800 rounded-2xl shadow-md p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">Príspevky používateľa</h3>
+              <h3 className="text-lg font-semibold">{postsTitle}</h3>
               {canEditProfile && (
                 <button
                   onClick={() => setIsCreating(true)}
@@ -620,23 +697,36 @@ export default function Profile() {
               </div>
             )}
           </div>
+
+          {/* Hodnotenia používateľa */}
+          <UserRatingsSection
+            userId={viewedUserId ?? undefined}
+            currentUserId={currentUserId}
+            baseUrl={baseUrl}
+            showRateButton={false}
+            className="mt-10"
+          />
         </div>
 
         {/* Editor profilu (modal) */}
         {isEditing && profile && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
             <div className="w-full max-w-xl bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6">
-              <h3 className="text-xl font-semibold mb-4">Upraviť profil</h3>
+              <h3 className="text-xl font-semibold mb-4">
+                Upraviť profil
+              </h3>
 
               <div className="grid grid-cols-1 gap-4">
                 {/* Avatar upload */}
                 <div>
-                  <label className="block text-sm mb-1">Profilová fotka</label>
+                  <label className="block text-sm mb-1">
+                    Profilová fotka
+                  </label>
                   <div className="flex items-center gap-4">
-                    <img
-                      src={avatarSrc || ManImage}
-                      className="w-16 h-16 rounded-full object-cover border"
-                      alt="Náhľad"
+                    <AvatarCircle
+                      sizeClass="w-16 h-16"
+                      textClass="text-lg"
+                      borderClass="border border-gray-300 dark:border-gray-600"
                     />
                     <input
                       type="file"
@@ -679,7 +769,9 @@ export default function Profile() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm mb-1">Priezvisko</label>
+                    <label className="block text-sm mb-1">
+                      Priezvisko
+                    </label>
                     <input
                       className="w-full rounded-lg border px-3 py-2 bg-white dark:bg-gray-900"
                       value={form.priezvisko}

@@ -25,7 +25,12 @@ type Post = {
   surname: string;
 };
 
-type Hobby = { id_hobby: number; nazov: string; id_kategoria: number; kategoria_nazov?: string };
+type Hobby = {
+  id_hobby: number;
+  nazov: string;
+  id_kategoria: number;
+  kategoria_nazov?: string;
+};
 
 const ROLE_LABELS: Record<string, string> = {
   user_dobrovolnik: "Dobrovoľník",
@@ -33,7 +38,8 @@ const ROLE_LABELS: Record<string, string> = {
   user_senior: "Dôchodca",
 };
 
-const formatRole = (role?: string | null) => ROLE_LABELS[role ?? ""] || "Použivateľ";
+const formatRole = (role?: string | null) =>
+  ROLE_LABELS[role ?? ""] || "Používateľ";
 
 const onlyDate = (val?: string | null) => {
   if (!val) return "";
@@ -54,22 +60,39 @@ const onlyDate = (val?: string | null) => {
 
 export default function PublicProfile() {
   const { id } = useParams<{ id: string }>();
-  const userId = useMemo(() => Number(id), [id]);
-  const baseUrl = (import.meta as any).env?.VITE_API_URL ?? "http://127.0.0.1:5000";
+
+  // bezpečný parse ID – pri neplatnom čísle vráti null
+  const userId = useMemo(() => {
+    if (!id) return null;
+    const parsed = Number(id);
+    return Number.isNaN(parsed) ? null : parsed;
+  }, [id]);
+
+  const baseUrl =
+    (import.meta as any).env?.VITE_API_URL ?? "http://127.0.0.1:5000";
   const navigate = useNavigate();
 
-  // if opening own public profile, redirect to private profile route
-  const currentUserId = useMemo(() => {
+  // načítanie prihláseného usera (id + rola)
+  const { currentUserId, currentUserRole } = useMemo(() => {
     try {
       const raw = localStorage.getItem("user");
-      if (!raw) return null;
+      if (!raw) return { currentUserId: null, currentUserRole: null };
       const u = JSON.parse(raw);
-      return u?.id ?? u?.id_user ?? null;
-    } catch { return null; }
+      return {
+        currentUserId: u?.id ?? u?.id_user ?? null,
+        currentUserRole: u?.role ?? null,
+      };
+    } catch {
+      return { currentUserId: null, currentUserRole: null };
+    }
   }, []);
 
+  const isCurrentUserAdmin =
+    currentUserRole === "admin" || currentUserId === 1;
+
+  // ak si otvoríš vlastný public profil → redirect na /profil
   useEffect(() => {
-    if (currentUserId && Number(currentUserId) === Number(userId)) {
+    if (currentUserId && userId && Number(currentUserId) === Number(userId)) {
       navigate("/profil", { replace: true });
     }
   }, [currentUserId, userId, navigate]);
@@ -95,15 +118,20 @@ export default function PublicProfile() {
           fetch(`${baseUrl}/api/profile/${userId}/avatar`),
         ]);
         if (!uRes.ok) throw new Error("Nepodarilo sa načítať profil");
+
         const u: User = await uRes.json();
         const pData = await pRes.json();
-        const pItems: Post[] = Array.isArray(pData) ? pData : (pData.items ?? []);
+        const pItems: Post[] = Array.isArray(pData)
+          ? pData
+          : pData.items ?? [];
         const hItems: Hobby[] = hRes.ok ? await hRes.json() : [];
+
         let avatarUrl: string | null = null;
         if (aRes.ok) {
           const a = await aRes.json();
           if (a?.url) avatarUrl = `${baseUrl}${a.url}`;
         }
+
         if (!mounted) return;
         setUser(u);
         setPosts(pItems ?? []);
@@ -116,11 +144,38 @@ export default function PublicProfile() {
         if (mounted) setLoading(false);
       }
     })();
-    return () => { mounted = false; };
-  }, [userId]);
+    return () => {
+      mounted = false;
+    };
+  }, [userId, baseUrl]);
 
-  if (loading) return <MainLayout><p className="text-center mt-10">Načítavam profil…</p></MainLayout>;
-  if (error || !user) return <MainLayout><p className="text-center mt-10 text-red-500">{error || "Profil neexistuje"}</p></MainLayout>;
+  if (loading)
+    return (
+      <MainLayout>
+        <p className="text-center mt-10">Načítavam profil…</p>
+      </MainLayout>
+    );
+
+  if (error || !user)
+    return (
+      <MainLayout>
+        <p className="text-center mt-10 text-red-500">
+          {error || "Profil neexistuje"}
+        </p>
+      </MainLayout>
+    );
+
+  // 🔒 voliteľná bezpečnostná úprava:
+  // bežný používateľ si nemôže manuálne otvoriť admin profil cez URL -- veľmi dobrá vec [Adam] :)
+  if (user.rola === "admin" && !isCurrentUserAdmin) {
+    return (
+      <MainLayout>
+        <p className="text-center mt-10 text-red-500">
+          Tento profil nie je dostupný.
+        </p>
+      </MainLayout>
+    );
+  }
 
   const fullName = `${user.meno ?? ""} ${user.priezvisko ?? ""}`.trim();
   const initials = (() => {
@@ -171,31 +226,42 @@ export default function PublicProfile() {
             <h2 className="text-2xl font-bold">{fullName}</h2>
           </div>
 
-          {/* pôvodná štruktúra bez záložiek */}
+          {/* Základné údaje + O mne */}
           <div className="mt-10 grid md:grid-cols-2 gap-6">
             <div className="bg-white dark:bg-gray-800 shadow-md rounded-2xl p-6">
               <h3 className="text-lg font-semibold mb-3">Základné údaje</h3>
               <ul className="space-y-2 text-gray-700 dark:text-gray-300">
-                <li>Rola: <span className="font-semibold">{roleText}</span></li>
+                <li>
+                  Rola:{" "}
+                  <span className="font-semibold">{roleText}</span>
+                </li>
                 <li>E-mail: {user.mail}</li>
                 {user.mesto && <li>Mesto: {user.mesto}</li>}
-                {user.datum_narodenia && <li>Dátum narodenia: {onlyDate(user.datum_narodenia)}</li>}
+                {user.datum_narodenia && (
+                  <li>Dátum narodenia: {onlyDate(user.datum_narodenia)}</li>
+                )}
               </ul>
             </div>
             <div className="bg-white dark:bg-gray-800 shadow-md rounded-2xl p-6">
               <h3 className="text-lg font-semibold mb-3">O mne</h3>
-              <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{user.about?.trim() || "Zatiaľ bez popisu."}</p>
+              <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
+                {user.about?.trim() || "Zatiaľ bez popisu."}
+              </p>
             </div>
           </div>
 
+          {/* Záľuby */}
           <div className="mt-6 bg-white dark:bg-gray-800 shadow-md rounded-2xl p-6">
             <h3 className="text-lg font-semibold mb-3">Záľuby</h3>
             {hobbies.length === 0 ? (
               <p className="text-gray-500">Zatiaľ nevybrané.</p>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {hobbies.map(h => (
-                  <span key={h.id_hobby} className="px-2 py-1 text-sm rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
+                {hobbies.map((h) => (
+                  <span
+                    key={h.id_hobby}
+                    className="px-2 py-1 text-sm rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300"
+                  >
                     {h.nazov}
                   </span>
                 ))}
@@ -203,10 +269,15 @@ export default function PublicProfile() {
             )}
           </div>
 
+          {/* Príspevky používateľa */}
           <div className="mt-10 bg-white dark:bg-gray-800 rounded-2xl shadow-md p-6">
-            <h3 className="text-lg font-semibold mb-4">Príspevky používateľa</h3>
+            <h3 className="text-lg font-semibold mb-4">
+              Príspevky používateľa
+            </h3>
             {posts.length === 0 ? (
-              <p className="text-gray-500 dark:text-gray-400 italic">Zatiaľ žiadne príspevky.</p>
+              <p className="text-gray-500 dark:text-gray-400 italic">
+                Zatiaľ žiadne príspevky.
+              </p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {posts.map((p) => (
@@ -224,11 +295,14 @@ export default function PublicProfile() {
             )}
           </div>
 
-          <UserRatingsSection userId={userId} currentUserId={currentUserId} baseUrl={baseUrl} className="mt-10" />
+          <UserRatingsSection
+            userId={userId ?? undefined}
+            currentUserId={currentUserId}
+            baseUrl={baseUrl}
+            className="mt-10"
+          />
         </div>
       </div>
     </MainLayout>
   );
 }
-
-
