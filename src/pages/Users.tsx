@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import MainLayout from "../layouts/MainLayout";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -10,7 +10,6 @@ interface User {
   rola?: string;
   avg_rating?: number | null;
   rating_count?: number | null;
-  rola?: string;
   similarity?: number;
   similarity_percent?: number;
 }
