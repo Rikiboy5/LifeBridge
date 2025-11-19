@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import MainLayout from "../layouts/MainLayout";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 interface User {
   id_user: number;
@@ -10,6 +10,8 @@ interface User {
   rola?: string;
   avg_rating?: number | null;
   rating_count?: number | null;
+  similarity?: number | null;
+  similarity_percent?: number | null;
 }
 
 type UsersApiResp =
@@ -52,6 +54,7 @@ const SORT_OPTIONS = [
 
 export default function Users() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +62,6 @@ export default function Users() {
   const [error, setError] = useState<string | null>(null);
 
   const [q, setQ] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [sortOption, setSortOption] = useState("id_desc");
   const [avatars, setAvatars] = useState<Record<number, string | null>>({});
@@ -68,13 +70,27 @@ export default function Users() {
 
   const baseUrl =
     (import.meta as any).env?.VITE_API_URL ?? "http://127.0.0.1:5000";
+
   const initialFetchRef = useRef(false);
+  const searchDebounceRef = useRef<number | null>(null);
+
+  // match mód z query parametru ?matchFor=<id>
+  const matchUserId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const raw = params.get("matchFor");
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, [location.search]);
+
+  const isMatchMode = matchUserId !== null;
 
   // načítanie prihláseného používateľa
   useEffect(() => {
     try {
       const raw = localStorage.getItem("user");
       if (raw) setCurrentUser(JSON.parse(raw));
+      else setCurrentUser(null);
     } catch {
       setCurrentUser(null);
     }
@@ -83,19 +99,19 @@ export default function Users() {
   const currentUserId = currentUser?.id ?? currentUser?.id_user ?? null;
   const isAdmin = currentUser?.role === "admin" || currentUserId === 1;
 
-  // debounce pre vyhľadávanie
+  // keď prepneme do match módu, zresetujeme textové vyhľadávanie
   useEffect(() => {
-    const handler = window.setTimeout(() => {
-      setDebouncedQuery(q.trim().toLowerCase());
-    }, 250);
-    return () => window.clearTimeout(handler);
-  }, [q]);
+    if (isMatchMode) {
+      setQ("");
+    }
+  }, [isMatchMode]);
 
-  // načítanie používateľov (podľa role + sort)
+  // základné načítanie zoznamu / match zoznamu
   useEffect(() => {
+    let cancelled = false;
+
     const fetchUsers = async () => {
       const isInitial = !initialFetchRef.current;
-
       if (isInitial) {
         setLoading(true);
       } else {
@@ -103,40 +119,129 @@ export default function Users() {
       }
 
       try {
-        const params = new URLSearchParams({
-          page: "1",
-          page_size: "50",
-          sort: sortOption,
-        });
-        if (roleFilter !== "all") {
-          params.set("role", roleFilter);
+        let endpoint: string;
+
+        if (isMatchMode && matchUserId) {
+          const params = new URLSearchParams({
+            top_n: "50",
+          });
+          endpoint = `/api/match/${matchUserId}?${params.toString()}`;
+        } else {
+          const params = new URLSearchParams({
+            page: "1",
+            page_size: "50",
+            sort: sortOption,
+          });
+          if (roleFilter !== "all") params.set("role", roleFilter);
+          endpoint = `/api/users?${params.toString()}`;
         }
 
-        const res = await fetch(`/api/users?${params.toString()}`);
-        if (!res.ok) throw new Error(await res.text());
+        const res = await fetch(endpoint);
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || "Chyba načítania používateľov.");
+        }
         const data: UsersApiResp = await res.json();
         const items = (Array.isArray(data) ? data : data.items) ?? [];
-        setUsers(items);
-        setError(null);
+        if (!cancelled) {
+          setUsers(items);
+          setError(null);
+        }
       } catch (e: any) {
-        setError(e.message || "Chyba načítania používateľov.");
-        setUsers([]);
+        if (!cancelled) {
+          setError(e.message || "Chyba načítania používateľov.");
+          setUsers([]);
+        }
       } finally {
-        if (!initialFetchRef.current) {
-          // prvé načítanie
-          initialFetchRef.current = true;
-          setLoading(false);
-        } else {
-          // ďalšie vyhľadávania / filtrovania
-          setSearching(false);
+        if (!cancelled) {
+          if (!initialFetchRef.current) {
+            initialFetchRef.current = true;
+            setLoading(false);
+          } else {
+            setSearching(false);
+          }
         }
       }
     };
 
     fetchUsers();
-  }, [roleFilter, sortOption]);
 
-  // načítanie avatarov
+    return () => {
+      cancelled = true;
+    };
+  }, [isMatchMode, matchUserId, roleFilter, sortOption]);
+
+  // server-side vyhľadávanie (sentence embeddings) – iba mimo match módu
+  useEffect(() => {
+    if (isMatchMode) return;
+
+    if (searchDebounceRef.current) {
+      window.clearTimeout(searchDebounceRef.current);
+    }
+
+    searchDebounceRef.current = window.setTimeout(async () => {
+      const term = q.trim();
+
+      // prázdne vyhľadávanie → znovu načítaj základný zoznam s filtrami
+      if (!term) {
+        try {
+          setSearching(true);
+          setError(null);
+          const params = new URLSearchParams({
+            page: "1",
+            page_size: "50",
+            sort: sortOption,
+          });
+          if (roleFilter !== "all") params.set("role", roleFilter);
+          const res = await fetch(`/api/users?${params.toString()}`);
+          const data: UsersApiResp = await res.json();
+          const items = (Array.isArray(data) ? data : data.items) ?? [];
+          setUsers(items);
+        } catch {
+          // necháme pôvodný stav, ak reload zlyhá
+        } finally {
+          setSearching(false);
+        }
+        return;
+      }
+
+      // ne-prázdny dotaz → voláme /api/users?q=... (sentence embedding search)
+      try {
+        setSearching(true);
+        setError(null);
+
+        const params = new URLSearchParams({
+          q: term,
+          page: "1",
+          page_size: "50",
+          sort: sortOption,
+        });
+        if (roleFilter !== "all") params.set("role", roleFilter);
+
+        const res = await fetch(`/api/users?${params.toString()}`);
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || "Chyba pri vyhľadávaní.");
+        }
+        const data: UsersApiResp = await res.json();
+        const items = (Array.isArray(data) ? data : data.items) ?? [];
+        setUsers(items);
+      } catch (e: any) {
+        setError(e.message || "Chyba pri vyhľadávaní.");
+        setUsers([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 250) as unknown as number;
+
+    return () => {
+      if (searchDebounceRef.current) {
+        window.clearTimeout(searchDebounceRef.current);
+      }
+    };
+  }, [q, isMatchMode, roleFilter, sortOption]);
+
+  // načítanie avatarov pre používateľov, ktorí ich ešte nemajú v cache
   useEffect(() => {
     const missing = users.filter((u) => avatars[u.id_user] === undefined);
     if (!missing.length) return;
@@ -146,15 +251,11 @@ export default function Users() {
       const results = await Promise.all(
         missing.map(async (u) => {
           try {
-            const res = await fetch(
-              `${baseUrl}/api/profile/${u.id_user}/avatar`
-            );
+            const res = await fetch(`${baseUrl}/api/profile/${u.id_user}/avatar`);
             if (!res.ok) return [u.id_user, null] as const;
             const data = await res.json();
-            return [
-              u.id_user,
-              data?.url ? `${baseUrl}${data.url}` : null,
-            ] as const;
+            const url = data?.url ? `${baseUrl}${data.url}` : null;
+            return [u.id_user, url] as const;
           } catch {
             return [u.id_user, null] as const;
           }
@@ -187,9 +288,7 @@ export default function Users() {
         />
       );
     }
-    const initials = `${user.meno?.[0] ?? ""}${
-      user.priezvisko?.[0] ?? ""
-    }`
+    const initials = `${user.meno?.[0] ?? ""}${user.priezvisko?.[0] ?? ""}`
       .trim()
       .toUpperCase();
     return (
@@ -203,6 +302,7 @@ export default function Users() {
     const hasRating =
       typeof user.avg_rating === "number" &&
       (user.rating_count ?? 0) > 0;
+
     if (!hasRating) {
       return (
         <span className="text-xs text-gray-400 dark:text-gray-500">
@@ -210,6 +310,7 @@ export default function Users() {
         </span>
       );
     }
+
     return (
       <div className="flex items-center gap-1 text-sm text-yellow-500 dark:text-yellow-400">
         <span aria-hidden="true">{"\u2605"}</span>
@@ -223,44 +324,24 @@ export default function Users() {
     );
   };
 
-  // client-side vyhľadávanie
-  const filteredUsers = useMemo(() => {
-    const term = debouncedQuery;
-    if (!term) return users;
-    return users.filter((user) => {
-      const full = `${user.meno ?? ""} ${user.priezvisko ?? ""}`.toLowerCase();
-      const first = (user.meno ?? "").toLowerCase();
-      const last = (user.priezvisko ?? "").toLowerCase();
-      const email = (user.mail ?? "").toLowerCase();
-      return (
-        full.includes(term) ||
-        first.includes(term) ||
-        last.includes(term) ||
-        email.includes(term)
-      );
-    });
-  }, [users, debouncedQuery]);
-
-  // ďalší filter – kto koho vidí (admin vs. bežný user)
+  // filter kto koho vidí (admin vs bežný používateľ)
   const visibleUsers = useMemo(() => {
-    return filteredUsers.filter((u) => {
-      // Neprihlásený – nevidí adminov ani systémového usera 1
+    return users.filter((u) => {
       if (!currentUser) {
         if (u.rola === "admin") return false;
         if (u.id_user === 1) return false;
         return true;
       }
 
-      // Admin vidí všetkých
       if (isAdmin) return true;
 
-      // Bežný používateľ:
-      if (u.rola === "admin") return false; // nevidí adminov
-      if (u.id_user === 1) return false; // nevidí systémového usera 1
-      // Sám seba naopak vidí – takže tu NEmáme filter na currentUserId
+      if (u.rola === "admin") return false;
+      if (u.id_user === 1) return false;
+
+      // sám seba vidí – takže žiadny filter na currentUserId
       return true;
     });
-  }, [filteredUsers, currentUser, isAdmin]);
+  }, [users, currentUser, isAdmin]);
 
   // mazanie používateľa – len admin
   const handleDeleteUser = async (id: number) => {
@@ -286,67 +367,81 @@ export default function Users() {
     <div className="mb-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold">Používatelia</h1>
+          <h1 className="text-3xl font-bold">
+            {isMatchMode ? "Odporúčané profily podľa záľub" : "Používatelia"}
+          </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Objav ľudí z komunity LifeBridge.
+            {isMatchMode
+              ? matchUserId
+                ? `Zobrazujú sa profily s najpodobnejšími záľubami k účtu #${matchUserId}.`
+                : "Zobrazujú sa profily s najpodobnejšími záľubami."
+              : "Objav ľudí z komunity LifeBridge."}
           </p>
         </div>
       </div>
 
-      <div className="mt-4 space-y-3">
-        {/* vyhľadávanie */}
-        <div className="relative">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Hľadaj meno, priezvisko alebo e-mail"
-            className="w-full border rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-gray-900 dark:border-gray-700"
-            aria-label="Vyhľadávanie používateľov"
-          />
-          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg">
-            ?
-          </span>
-        </div>
+      {!isMatchMode && (
+        <div className="mt-4 space-y-3">
+          {/* vyhľadávanie */}
+          <div className="relative">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Hľadaj meno, priezvisko alebo e-mail"
+              className="w-full border rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-gray-900 dark:border-gray-700"
+              aria-label="Vyhľadávanie používateľov"
+            />
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg">
+              ?
+            </span>
+          </div>
 
-        {/* filter + sort */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <select
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-              className="w-full border rounded-2xl px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:border-gray-700"
-              aria-label="Filter role"
-            >
-              {ROLE_FILTER_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <select
-              value={sortOption}
-              onChange={(e) => setSortOption(e.target.value)}
-              className="w-full border rounded-2xl px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:border-gray-700"
-              aria-label="Triedenie"
-            >
-              {SORT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+          {/* filter + sort */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <select
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value)}
+                className="w-full border rounded-2xl px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:border-gray-700"
+                aria-label="Filter role"
+              >
+                {ROLE_FILTER_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <select
+                value={sortOption}
+                onChange={(e) => setSortOption(e.target.value)}
+                className="w-full border rounded-2xl px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:border-gray-700"
+                aria-label="Triedenie"
+              >
+                {SORT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="text-xs text-gray-500 mt-1">
-        {q.trim()
-          ? searching
-            ? "Hľadám…"
-            : `Výsledky: ${visibleUsers.length}`
-          : `Počet používateľov: ${visibleUsers.length}`}
+        {isMatchMode ? (
+          <>Nájdené odporúčania: {visibleUsers.length}</>
+        ) : q.trim() ? (
+          searching ? (
+            <>Hľadám…</>
+          ) : (
+            <>Výsledky: {visibleUsers.length}</>
+          )
+        ) : (
+          <>Počet používateľov: {visibleUsers.length}</>
+        )}
       </div>
     </div>
   );
@@ -363,7 +458,9 @@ export default function Users() {
     if (visibleUsers.length === 0) {
       return (
         <p className="text-center text-gray-500 dark:text-gray-400">
-          {q.trim()
+          {isMatchMode
+            ? "Žiadne vhodné odporúčania."
+            : q.trim()
             ? "Nenašli sa žiadni používatelia."
             : "Zatiaľ žiadni používatelia."}
         </p>
@@ -396,7 +493,14 @@ export default function Users() {
               </div>
             </div>
 
-            <div>{renderRatingInfo(user)}</div>
+            <div className="flex flex-col gap-1">
+              {renderRatingInfo(user)}
+              {typeof user.similarity_percent === "number" && (
+                <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                  Zhoda záľub: {user.similarity_percent}%
+                </span>
+              )}
+            </div>
 
             {/* Admin akcie */}
             {isAdmin && (
