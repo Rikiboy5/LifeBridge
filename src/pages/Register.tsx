@@ -2,6 +2,8 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import MainLayout from "../layouts/MainLayout";
 
+import VoiceRegistrationAssistant from "../components/VoiceRegistrationAssistant";
+
 interface Hobby {
   id_hobby: number;
   nazov: string;
@@ -16,6 +18,15 @@ interface Category {
   ikona: string;
   pocet_hobby: number;
 }
+
+type VoiceField =
+  | "firstName"
+  | "lastName"
+  | "email"
+  | "password"
+  | "passwordConfirm"
+  | "birthdate";
+type VoicePayload = Record<VoiceField, string>;
 
 export default function Register() {
   const navigate = useNavigate();
@@ -57,6 +68,7 @@ export default function Register() {
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showVoiceAssistant, setShowVoiceAssistant] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState({
     length: false,
     uppercase: false,
@@ -65,6 +77,36 @@ export default function Register() {
     special: false,
   });
   const [passwordsMatch, setPasswordsMatch] = useState(true);
+
+  const syncVoiceValue = (key: VoiceField, value: string) => {
+    const next = value.trim();
+    if (!next) return;
+    setForm((prev) => {
+      switch (key) {
+        case "firstName":
+          return { ...prev, name: next };
+        case "lastName":
+          return { ...prev, surname: next };
+        case "email":
+          return { ...prev, email: next };
+        case "password":
+          return { ...prev, password: next };
+        case "passwordConfirm":
+          return { ...prev, password_confirm: next };
+        case "birthdate":
+          return { ...prev, birthdate: next };
+        default:
+          return prev;
+      }
+    });
+  };
+
+  const handleVoiceComplete = (payload: VoicePayload) => {
+    (Object.keys(payload) as VoiceField[]).forEach((field) => {
+      syncVoiceValue(field, payload[field]);
+    });
+    setMessage("");
+  };
 
   // Načítanie hobby a kategórií z API
   useEffect(() => {
@@ -247,8 +289,36 @@ export default function Register() {
           </h2>
 
           {/* KROK 1: Základné údaje */}
+          
+
           {step === 1 && (
             <div className="space-y-4">
+              <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-800/60">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">Chceš vyplniť údaje hlasom?</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Prepni asistenta a nadiktuj mu údaje.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowVoiceAssistant((prev) => !prev)}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      showVoiceAssistant ? "bg-red-600 text-white hover:bg-red-700" : "bg-blue-600 text-white hover:bg-blue-700"
+                    }`}
+                  >
+                    {showVoiceAssistant ? "Skryť hlasové zadanie" : "Chcem hovoriť"}
+                  </button>
+                </div>
+                {showVoiceAssistant && (
+                  <div className="mt-4">
+                    <VoiceRegistrationAssistant
+                      onStepResolved={syncVoiceValue}
+                      onComplete={handleVoiceComplete}
+                    />
+                  </div>
+                )}
+              </div>
+
               <input
                 type="text"
                 name="name"

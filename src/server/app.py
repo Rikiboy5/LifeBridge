@@ -9,6 +9,12 @@ from datetime import datetime
 from werkzeug.utils import secure_filename
 from contextlib import contextmanager
 import logging
+import json
+import numpy as np
+from sentence_transformers import SentenceTransformer
+EMBEDDING_MODEL_NAME = "intfloat/multilingual-e5-base"
+model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -58,6 +64,155 @@ def db_conn():
             logging.debug("DB conn closed (ctx)")
         except Exception:
             pass
+
+def build_user_hobby_text(conn, user_id: int) -> str:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id_user FROM users WHERE id_user = %s AND soft_del = 0",
+            (user_id,),
+        )
+        if not cur.fetchone():
+            raise ValueError("User not found")
+
+        cur.execute(
+            """
+            SELECT h.nazov
+            FROM user_hobby uh
+            JOIN hobby h ON h.id_hobby = uh.id_hobby
+            WHERE uh.id_user = %s
+            """,
+            (user_id,),
+        )
+        hobbies = [row[0] for row in cur.fetchall()]
+    finally:
+        cur.close()
+
+    if not hobbies:
+        return ""
+
+    return "Záľuby: " + ", ".join(hobbies) + "."
+
+
+def generate_and_save_user_embedding(user_id: int):
+    with db_conn() as conn:
+        text = build_user_hobby_text(conn, user_id)
+        if not text.strip():
+            return
+
+        emb = model.encode(text)
+        emb_list = emb.tolist()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                INSERT INTO user_embeddings (user_id, embedding, model_name)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                  embedding = VALUES(embedding),
+                  model_name = VALUES(model_name),
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (user_id, json.dumps(emb_list), EMBEDDING_MODEL_NAME),
+            )
+            conn.commit()
+        finally:
+            cur.close()
+
+
+def get_user_embedding_vector(conn, user_id: int):
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT embedding FROM user_embeddings WHERE user_id = %s",
+            (user_id,),
+        )
+        row = cur.fetchone()
+    finally:
+        cur.close()
+
+    if not row:
+        return None
+
+    return np.array(json.loads(row[0]), dtype=float)
+
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    denom = np.linalg.norm(a) * np.linalg.norm(b)
+    if denom == 0.0:
+        return 0.0
+    return float(np.dot(a, b) / denom)
+
+
+def find_best_matches_for_user(
+    user_id: int, top_n: int = 5, target_role: str | None = None
+):
+    with db_conn() as conn:
+        emb = get_user_embedding_vector(conn, user_id)
+        if emb is None:
+            text = build_user_hobby_text(conn, user_id)
+            if not text.strip():
+                return []
+
+            emb = model.encode(text)
+            emb_list = emb.tolist()
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO user_embeddings (user_id, embedding, model_name)
+                    VALUES (%s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                      embedding = VALUES(embedding),
+                      model_name = VALUES(model_name),
+                      updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (user_id, json.dumps(emb_list), EMBEDDING_MODEL_NAME),
+                )
+                conn.commit()
+            finally:
+                cur.close()
+
+        params = [user_id]
+        where = ["u.id_user != %s", "u.soft_del = 0"]
+        if target_role:
+            where.append("u.rola = %s")
+            params.append(target_role)
+
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                f"""
+                SELECT u.id_user, u.meno, u.priezvisko, u.mail, u.rola, e.embedding
+                FROM users u
+                JOIN user_embeddings e ON e.user_id = u.id_user
+                WHERE {" AND ".join(where)}
+                """,
+                tuple(params),
+            )
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+
+        results = []
+        for row in rows:
+            other_emb = np.array(json.loads(row["embedding"]), dtype=float)
+            sim = cosine_similarity(emb, other_emb)
+            results.append(
+                {
+                    "id_user": row["id_user"],
+                    "meno": row["meno"],
+                    "priezvisko": row["priezvisko"],
+                    "mail": row["mail"],
+                    "rola": row["rola"],
+                    "similarity": sim,
+                    "similarity_percent": round(sim * 100, 1),
+                }
+            )
+
+        results.sort(key=lambda x: x["similarity"], reverse=True)
+        return results[:top_n]
+
 
 # Filesystem storage for avatars (no DB)
 BASE_DIR = os.path.dirname(__file__)
@@ -223,7 +378,14 @@ def register_user():
                     (user_id, hobby_id)
                 )
             conn.commit()
-        
+        try:
+            generate_and_save_user_embedding(user_id)
+        except Exception as emb_err:
+            logging.warning(
+                "Failed to generate user embedding for %s: %s",
+                user_id,
+                emb_err,
+            )
         return jsonify({
             "success": True, 
             "user": f"{name} {surname}",
@@ -1154,13 +1316,49 @@ def put_user_hobbies(user_id: int):
                 [(user_id, hid) for hid in hobby_ids],
             )
         conn.commit()
+        try:
+            generate_and_save_user_embedding(user_id)
+        except Exception as emb_err:
+            logging.warning(
+                "Failed to refresh user embedding for %s: %s",
+                user_id,
+                emb_err,
+            )
         return jsonify({"success": True, "count": len(hobby_ids)}), 200
+    
     except Exception as e:
         conn.rollback()
         return jsonify({"error": f"Chyba pri ukladaní záľub: {str(e)}"}), 500
     finally:
         cur.close()
         conn.close()
+
+@app.get("/api/match/<int:user_id>")
+def api_match_user(user_id: int):
+    try:
+        top_n = int(request.args.get("top_n", 5))
+    except Exception:
+        top_n = 5
+
+    target_role = request.args.get("role") or None
+
+    try:
+        matches = find_best_matches_for_user(
+            user_id,
+            top_n=max(1, top_n),
+            target_role=target_role,
+        )
+    except Exception as exc:
+        logging.exception("Failed to match user %s: %s", user_id, exc)
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify(matches), 200
+
+    
+# ==========================================
+# MATCH ENDPOINT
+# ==========================================
+
 
 # ------------------------------------------
 # ACTIVITIES
