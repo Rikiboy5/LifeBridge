@@ -535,6 +535,7 @@ def get_users():
                     u.meno,
                     u.priezvisko,
                     u.mail,
+                    u.rola,
                     r.avg_rating,
                     r.rating_count,
                     {score_sql} AS score
@@ -560,6 +561,7 @@ def get_users():
                     u.meno,
                     u.priezvisko,
                     u.mail,
+                    u.rola,
                     r.avg_rating,
                     r.rating_count
                 FROM users u
