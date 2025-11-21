@@ -45,10 +45,23 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "WARNING"))
 # Bezpečný getter s ukladaním do g + lazy
 def get_conn():
     conn = getattr(g, "_db_conn", None)
-    if conn is None or not conn.is_connected():
-        conn = pool.get_connection()
+    try:
+        if conn and conn.is_connected():
+            return conn
+    except Exception:
+        # stale/closed connection left in g; drop it and reopen
+        conn = None
+        try:
+            setattr(g, "_db_conn", None)
+        except Exception:
+            pass
+
+    conn = pool.get_connection()
+    try:
         setattr(g, "_db_conn", conn)
-        logging.debug("DB conn acquired")
+    except Exception:
+        pass
+    logging.debug("DB conn acquired")
     return conn
 
 @contextmanager
@@ -551,7 +564,8 @@ def get_users():
                 ORDER BY {sort_sql}
                 LIMIT %s OFFSET %s
                 """,
-                params + score_params + [page_size, offset],
+                # score placeholders come first in SELECT, then WHERE params
+                score_params + params + [page_size, offset],
             )
         else:
             cur.execute(
