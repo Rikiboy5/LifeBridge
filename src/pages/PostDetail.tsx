@@ -77,6 +77,7 @@ export default function PostDetail() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [extraImages, setExtraImages] = useState<string[]>([]);
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -204,6 +205,24 @@ export default function PostDetail() {
     setFormCategory(post.category);
     setFormImage(post.image ?? null);
     setFormDescription(post.description);
+  };
+
+  const handleExtraImagesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) {
+      setExtraImages([]);
+      return;
+    }
+    Promise.all(
+      files.map(
+        (file) =>
+          new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve((reader.result as string) || "");
+            reader.readAsDataURL(file);
+          })
+      )
+    ).then((images) => setExtraImages(images.filter(Boolean)));
   };
 
   if (loading) {
@@ -342,6 +361,40 @@ export default function PostDetail() {
           </div>
         </div>
 
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Dalsie obrazky</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Len ukazka UI, obrazky sa zatial neukladaju.</p>
+            </div>
+            <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm cursor-pointer hover:bg-indigo-700 transition">
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleExtraImagesChange}
+              />
+              Pridat obrazky
+            </label>
+          </div>
+
+          {extraImages.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">Zatial ziadne pridane obrazky.</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {extraImages.map((src, idx) => (
+                <div
+                  key={idx}
+                  className="aspect-square rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-center"
+                >
+                  <img src={src} alt={`Nahraty obrazok ${idx + 1}`} className="w-full h-full object-cover" />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-6">
           <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-3">
             <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Autor</p>
@@ -369,12 +422,6 @@ export default function PostDetail() {
                   <p className="text-sm text-gray-600 dark:text-gray-300 truncate">
                     {profile?.rola || "Pouzivatel"} • {profile?.mesto || "nezadane mesto"}
                   </p>
-                  <div className="flex items-center gap-1 text-sm text-yellow-500">
-                    <span>{"\u2605"}</span>
-                    <span className="text-gray-700 dark:text-gray-200">
-                      {typeof post.avg_rating === "number" ? post.avg_rating.toFixed(1) : "—"} / 5
-                    </span>
-                  </div>
                 </div>
               </div>
             </button>
