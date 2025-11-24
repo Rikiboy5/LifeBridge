@@ -19,11 +19,13 @@ export default function Card({
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
       {/* Obrázok */}
       {image && (
-        <img
-          src={image}
-          alt={title}
-          className="w-full h-48 object-cover"
-        />
+        <div className="w-full h-56 bg-gradient-to-b from-indigo-50 to-white dark:from-gray-800 dark:to-gray-900 flex items-center justify-center overflow-hidden">
+          <img
+            src={image}
+            alt={title}
+            className="max-h-full max-w-full object-contain p-2"
+          />
+        </div>
       )}
 
       {/* Obsah */}
