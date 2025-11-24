@@ -244,7 +244,7 @@ export default function PublicProfile() {
             </div>
             <div className="bg-white dark:bg-gray-800 shadow-md rounded-2xl p-6">
               <h3 className="text-lg font-semibold mb-3">O mne</h3>
-              <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
+              <p className="text-gray-700 dark:text-gray-300 leading-relaxed break-words">
                 {user.about?.trim() || "Zatiaľ bez popisu."}
               </p>
             </div>

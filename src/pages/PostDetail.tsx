@@ -74,6 +74,7 @@ export default function PostDetail() {
   const [post, setPost] = useState<Post | null>(null);
   const [profile, setProfile] = useState<AuthorProfile | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -116,17 +117,30 @@ export default function PostDetail() {
     if (!post?.user_id) {
       setProfile(null);
       setProfileError(null);
+      setAvatarUrl(null);
       return;
     }
     setProfile(null);
     setProfileError(null);
-    fetch(`${API_BASE}/api/profile/${post.user_id}`)
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Nepodarilo sa nacitat profil autora.");
-        return data as AuthorProfile;
+    Promise.all([
+      fetch(`${API_BASE}/api/profile/${post.user_id}`),
+      fetch(`${API_BASE}/api/profile/${post.user_id}/avatar`),
+    ])
+      .then(async ([profileRes, avatarRes]) => {
+        const profileData = await profileRes.json();
+        if (!profileRes.ok) throw new Error(profileData.error || "Nepodarilo sa nacitat profil autora.");
+
+        let avatar: string | null = null;
+        if (avatarRes.ok) {
+          const a = await avatarRes.json();
+          if (a?.url) avatar = `${API_BASE}${a.url}`;
+        }
+        return { profileData: profileData as AuthorProfile, avatar };
       })
-      .then((data) => setProfile(data))
+      .then(({ profileData, avatar }) => {
+        setProfile(profileData);
+        setAvatarUrl(avatar);
+      })
       .catch((e) => setProfileError(e.message || "Nepodarilo sa nacitat profil autora."));
   }, [post?.user_id]);
 
@@ -329,19 +343,44 @@ export default function PostDetail() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-6">
-          <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-2">
+          <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-3">
             <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Autor</p>
-            <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {post.name} {post.surname}
-            </p>
-            <p className="text-sm text-gray-600 dark:text-gray-300">
-              {profile?.rola || "Pouzivatel"} • {profile?.mesto || "nezadane mesto"}
-            </p>
-            <p className="text-sm text-gray-600 dark:text-gray-300">
-              Hodnotenie: {typeof post.avg_rating === "number" ? post.avg_rating.toFixed(1) : "—"} / 5
-            </p>
+
+            <button
+              type="button"
+              onClick={() => navigate(`/user/${post.user_id}`)}
+              className="w-full text-left rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/80 p-2 transition"
+            >
+              <div className="flex gap-4 items-start">
+                <div className="w-14 h-14 rounded-full overflow-hidden ring-2 ring-indigo-100 dark:ring-indigo-900 bg-gray-100 dark:bg-gray-700 flex-shrink-0">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt={`${post.name} ${post.surname}`} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-semibold">
+                      {(post.name?.[0] || "") + (post.surname?.[0] || "") || "?"}
+                    </div>
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
+                    {post.name} {post.surname}
+                  </p>
+                  <p className="text-sm text-gray-600 dark:text-gray-300 truncate">
+                    {profile?.rola || "Pouzivatel"} • {profile?.mesto || "nezadane mesto"}
+                  </p>
+                  <div className="flex items-center gap-1 text-sm text-yellow-500">
+                    <span>{"\u2605"}</span>
+                    <span className="text-gray-700 dark:text-gray-200">
+                      {typeof post.avg_rating === "number" ? post.avg_rating.toFixed(1) : "—"} / 5
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </button>
+
             {profile?.about && (
-              <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed mt-2 whitespace-pre-line">
+              <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed mt-1 whitespace-pre-line break-words">
                 {profile.about}
               </p>
             )}
