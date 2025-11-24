@@ -12,6 +12,12 @@ interface CardProps {
 
 export default function Card({ title, description, image, author, category, onClick, rating }: CardProps) {
   const clickable = typeof onClick === "function";
+  const descriptionClamp: React.CSSProperties = {
+    display: "-webkit-box",
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  };
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!clickable) return;
     if (e.key === "Enter" || e.key === " ") {
@@ -42,15 +48,20 @@ export default function Card({ title, description, image, author, category, onCl
         <h3 className="text-xl font-semibold text-gray-900 dark:text-white break-words line-clamp-2">{title}</h3>
 
         {category && (
-          <span className="inline-block bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-sm px-2 py-1 rounded-lg w-fit">
+          <span className="inline-flex items-center justify-center bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-sm px-3 py-1 rounded-lg w-fit min-h-[32px]">
             {category}
           </span>
         )}
 
-        <p className="text-gray-700 dark:text-gray-300 line-clamp-3 break-words">{description}</p>
+        <p
+          className="text-gray-700 dark:text-gray-300 break-words leading-relaxed min-h-[4.5rem]"
+          style={descriptionClamp}
+        >
+          {description}
+        </p>
 
-        <div className="mt-auto flex items-center justify-between text-sm text-gray-500 dark:text-gray-400 pt-2 border-t border-gray-200 dark:border-gray-700">
-          <div className="flex items-center space-x-1 truncate">
+        <div className="mt-auto flex flex-col gap-1 text-sm text-gray-500 dark:text-gray-400 pt-2 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex items-center space-x-1 overflow-hidden text-ellipsis whitespace-nowrap">
             {author && <span className="font-medium truncate">{author}</span>}
           </div>
           {typeof rating === "number" && (

@@ -477,11 +477,11 @@ export default function Users() {
             title="Zobraziť profil používateľa"
           >
             <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-full overflow-hidden ring-2 ring-indigo-100 dark:ring-indigo-900 bg-gray-100 dark:bg-gray-700">
+              <div className="w-16 h-16 rounded-full overflow-hidden ring-2 ring-indigo-100 dark:ring-indigo-900 bg-gray-100 dark:bg-gray-700 flex-shrink-0">
                 {renderAvatar(user)}
               </div>
               <div>
-                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                <p className="text-lg font-semibold text-gray-900 dark:text-white overflow-hidden text-ellipsis whitespace-nowrap max-w-[200px] sm:max-w-[220px]">
                   {user.meno} {user.priezvisko}
                 </p>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
