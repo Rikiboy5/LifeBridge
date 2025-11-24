@@ -988,23 +988,35 @@ def get_posts():
         """, params)
         total = cur.fetchone()["total"]
 
+        rating_join = """
+            LEFT JOIN (
+                SELECT user_id, AVG(rating) AS avg_rating
+                FROM user_ratings
+                GROUP BY user_id
+            ) r ON r.user_id = p.user_id
+        """
+
         if q:
             cur.execute(f"""
-                SELECT p.id_post, p.title, p.description, p.image, p.category,
+                SELECT p.id_post, p.title, p.description, p.image, p.category, p.user_id,
                        u.meno AS name, u.priezvisko AS surname,
+                       r.avg_rating,
                        {score_sql} AS score
                 FROM posts p
                 JOIN users u ON u.id_user = p.user_id
+                {rating_join}
                 WHERE {where_sql}
                 ORDER BY {sort_sql}
                 LIMIT %s OFFSET %s
             """, params + score_params + [page_size, offset])
         else:
             cur.execute(f"""
-                SELECT p.id_post, p.title, p.description, p.image, p.category,
-                       u.meno AS name, u.priezvisko AS surname
+                SELECT p.id_post, p.title, p.description, p.image, p.category, p.user_id,
+                       u.meno AS name, u.priezvisko AS surname,
+                       r.avg_rating
                 FROM posts p
                 JOIN users u ON u.id_user = p.user_id
+                {rating_join}
                 WHERE {where_sql}
                 ORDER BY {sort_sql}
                 LIMIT %s OFFSET %s
@@ -1026,6 +1038,37 @@ def get_posts():
         }), 200
     except Exception as e:
         return jsonify({"error": f"Chyba pri načítaní príspevkov: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+@app.get("/api/posts/<int:id_post>")
+def get_post_detail(id_post: int):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT p.id_post, p.title, p.description, p.image, p.category, p.user_id,
+                   u.meno AS name, u.priezvisko AS surname,
+                   r.avg_rating
+            FROM posts p
+            JOIN users u ON u.id_user = p.user_id
+            LEFT JOIN (
+                SELECT user_id, AVG(rating) AS avg_rating
+                FROM user_ratings
+                GROUP BY user_id
+            ) r ON r.user_id = p.user_id
+            WHERE p.id_post = %s
+            """,
+            (id_post,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Prispevok neexistuje."}), 404
+        return jsonify(row), 200
+    except Exception as e:
+        return jsonify({"error": f"Chyba pri nacitani prispevku: {str(e)}"}), 500
     finally:
         cur.close()
         conn.close()
@@ -1054,7 +1097,7 @@ def create_post():
 
         cur = conn.cursor(dictionary=True)
         cur.execute("""
-            SELECT p.id_post, p.title, p.description, p.image, p.category,
+            SELECT p.id_post, p.title, p.description, p.image, p.category, p.user_id,
                    u.meno AS name, u.priezvisko AS surname
             FROM posts p
             JOIN users u ON u.id_user = p.user_id

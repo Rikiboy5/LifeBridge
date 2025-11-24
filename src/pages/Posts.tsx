@@ -1,12 +1,15 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import MainLayout from "../layouts/MainLayout";
 import Card from "../components/Card";
 import CardCreator from "../components/CardCreator";
-import dobrovolnictvoImg from "../assets/dobrovolníctvo.png";
+import dobrovolnictvoImg from "../assets/dobrovolnictvo.png";
 import vzdelavanieImg from "../assets/vzdelavanie.png";
 import pomocSenioromImg from "../assets/pomoc_seniorom.png";
 import spolocenskaAktivitaImg from "../assets/spolocenska_aktivita.png";
 import ineImg from "../assets/ine.png";
+
+const API_BASE = "http://127.0.0.1:5000";
 
 interface User {
   id?: number;
@@ -24,6 +27,8 @@ interface Post {
   category: string;
   name: string;
   surname: string;
+  user_id: number;
+  avg_rating?: number | null;
 }
 
 type PostsApiResp =
@@ -61,6 +66,7 @@ const resolveImage = (post: Post) => {
 };
 
 export default function Posts() {
+  const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
   const [allPosts, setAllPosts] = useState<Post[]>([]);
   const [isCreating, setIsCreating] = useState(false);
@@ -82,18 +88,18 @@ export default function Posts() {
     if (storedUser) setUser(JSON.parse(storedUser));
   }, []);
 
-  const loadInitial = async () => {
+const loadInitial = async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch("http://127.0.0.1:5000/api/posts");
-      if (!res.ok) throw new Error("Chyba pri načítaní príspevkov");
+      const res = await fetch(`${API_BASE}/api/posts`);
+      if (!res.ok) throw new Error("Chyba pri nacitani prispevkov");
       const data: PostsApiResp = await res.json();
       const items = Array.isArray(data) ? data : data.items;
       setPosts(items ?? []);
       setAllPosts(items ?? []);
     } catch (err: any) {
-      setError(err.message || "Chyba načítania");
+      setError(err.message || "Chyba nacitania");
       setPosts([]);
     } finally {
       setLoading(false);
@@ -131,7 +137,7 @@ export default function Posts() {
           page_size: "50",
           sort: "relevance",
         });
-        const res = await fetch(`http://127.0.0.1:5000/api/posts?${qs.toString()}`, {
+        const res = await fetch(`${API_BASE}/api/posts?${qs.toString()}`, {
           signal: ctrl.signal,
         });
         if (!res.ok) throw new Error(await res.text());
@@ -142,7 +148,7 @@ export default function Posts() {
         setPosts(items ?? []);
       } catch (e: any) {
         if (e.name === "AbortError") return;
-        setError(e.message || "Chyba pri vyhľadávaní");
+        setError(e.message || "Chyba pri vyhladavani");
         setPosts([]);
       } finally {
         if (lastIssuedTermRef.current === term) setSearching(false);
@@ -168,9 +174,9 @@ export default function Posts() {
     image?: string | null;
     category: string;
   }) => {
-    if (!user) return alert("Musíš byť prihlásený!");
+    if (!user) return alert("Musis byt prihlaseny!");
     const payload = { ...postData, user_id: user.id || user.id_user };
-    const res = await fetch("http://127.0.0.1:5000/api/posts", {
+    const res = await fetch(`${API_BASE}/api/posts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -179,7 +185,7 @@ export default function Posts() {
       setIsCreating(false);
       await refreshAfterChange();
     } else {
-      console.error("Nepodarilo sa vytvoriť príspevok:", await res.text());
+      console.error("Nepodarilo sa vytvorit prispevok:", await res.text());
     }
   };
 
@@ -191,7 +197,7 @@ export default function Posts() {
   }) => {
     if (!editingPost) return;
     const payload = { ...postData, id_post: editingPost.id_post };
-    const res = await fetch(`http://127.0.0.1:5000/api/posts/${editingPost.id_post}`, {
+    const res = await fetch(`${API_BASE}/api/posts/${editingPost.id_post}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -201,22 +207,28 @@ export default function Posts() {
       setEditingPost(null);
       await refreshAfterChange();
     } else {
-      console.error("Nepodarilo sa upraviť príspevok:", await res.text());
+      console.error("Nepodarilo sa upravit prispevok:", await res.text());
     }
   };
 
   const handleDeletePost = async (id: number) => {
-    const res = await fetch(`http://127.0.0.1:5000/api/posts/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API_BASE}/api/posts/${id}`, { method: "DELETE" });
     if (res.ok) await refreshAfterChange();
   };
+
+  const handleOpenDetail = (id: number) => {
+    navigate(`/posts/${id}`);
+  };
+
+  const currentUserName = useMemo(() => (user ? `${user.name} ${user.surname}` : ""), [user]);
 
   if (loading) {
     return (
       <MainLayout>
         <div className="max-w-6xl mx-auto p-8">
-          <h1 className="text-3xl font-bold mb-6">Príspevky komunity</h1>
+          <h1 className="text-3xl font-bold mb-6">Prispevky komunity</h1>
           <div className="h-10 w-full max-w-xl animate-pulse bg-gray-200 dark:bg-gray-700 rounded-lg" />
-          <p className="text-center mt-10 text-gray-600 dark:text-gray-300">Načítavam príspevky…</p>
+          <p className="text-center mt-10 text-gray-600 dark:text-gray-300">Nacitavam prispevky...</p>
         </div>
       </MainLayout>
     );
@@ -226,14 +238,14 @@ export default function Posts() {
     return (
       <MainLayout>
         <div className="max-w-6xl mx-auto p-8 space-y-6">
-          <h1 className="text-3xl font-bold">Príspevky komunity</h1>
+          <h1 className="text-3xl font-bold">Prispevky komunity</h1>
           <div className="w-full sm:w-96">
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Hľadaj názov, popis, kategóriu alebo autora…"
+              placeholder="Hladaj nazov, popis, kategoriu alebo autora..."
               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              aria-label="Vyhľadávanie príspevkov"
+              aria-label="Vyhladavanie prispevkov"
             />
           </div>
           <p className="text-center text-red-500">{error}</p>
@@ -252,12 +264,12 @@ export default function Posts() {
                 id="post-search"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Hľadaj názov, popis, kategóriu alebo autora…"
+                placeholder="Hladaj nazov, popis, kategoriu alebo autora..."
                 className="w-full border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                aria-label="Vyhľadávanie príspevkov"
+                aria-label="Vyhladavanie prispevkov"
               />
               <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500 dark:text-gray-400 pointer-events-none">
-                {searching ? "Hľadám…" : q.trim() ? `Výsledky: ${posts.length}` : `Príspevkov: ${posts.length}`}
+                {searching ? "Hladam..." : q.trim() ? `Vysledky: ${posts.length}` : `Prispevkov: ${posts.length}`}
               </div>
             </div>
             {user && (
@@ -265,7 +277,7 @@ export default function Posts() {
                 onClick={() => setIsCreating(true)}
                 className="sm:justify-self-end bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl shadow-md transition shrink-0"
               >
-                + Pridať príspevok
+                + Pridat prispevok
               </button>
             )}
           </div>
@@ -273,21 +285,23 @@ export default function Posts() {
 
         {posts.length === 0 ? (
           <div className="text-center text-gray-600 dark:text-gray-300 py-12 border border-dashed border-gray-300 dark:border-gray-700 rounded-2xl">
-            {q.trim() ? "Nenašli sa žiadne príspevky." : "Zatiaľ žiadne príspevky."}
+            {q.trim() ? "Nenaisli sa ziadne prispevky." : "Zatial ziadne prispevky."}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 items-stretch">
             {posts.map((post) => (
-              <div key={post.id_post} className="relative group">
+              <div key={post.id_post} className="relative group h-full">
                 <Card
                   title={post.title}
                   description={post.description}
                   image={resolveImage(post)}
                   author={`${post.name} ${post.surname}`}
                   category={post.category}
+                  rating={typeof post.avg_rating === "number" ? post.avg_rating : undefined}
+                  onClick={() => handleOpenDetail(post.id_post)}
                 />
                 {user &&
-                  (user.role === "admin" || `${user.name} ${user.surname}` === `${post.name} ${post.surname}`) && (
+                  (user.role === "admin" || currentUserName === `${post.name} ${post.surname}`) && (
                     <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition">
                       <button
                         onClick={() => {
@@ -296,13 +310,13 @@ export default function Posts() {
                         }}
                         className="bg-yellow-500 hover:bg-yellow-600 text-white text-sm px-3 py-1 rounded-md shadow-sm"
                       >
-                        Upraviť
+                        Upravit
                       </button>
                       <button
                         onClick={() => handleDeletePost(post.id_post)}
                         className="bg-red-500 hover:bg-red-600 text-white text-sm px-3 py-1 rounded-md shadow-sm"
                       >
-                        Zmazať
+                        Zmazat
                       </button>
                     </div>
                   )}

@@ -5,6 +5,7 @@ import Users from "./pages/Users";
 import Register from "./pages/Register";
 import Login from "./pages/Login";
 import Posts from "./pages/Posts";
+import PostDetail from "./pages/PostDetail";
 import Blog from "./pages/Blog";
 import ActivityDetail from "./pages/ActivityDetail";
 import CreateActivity from "./pages/CreateActivity";
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
         <Route path="/posts" element={<Posts />} />
+        <Route path="/posts/:id" element={<PostDetail />} />
         <Route path="/blog" element={<Blog />} />
         <Route path="/activities" element={<Blog />} />
         <Route path="/activities/create" element={<CreateActivity />} />
