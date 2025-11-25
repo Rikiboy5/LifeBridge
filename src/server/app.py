@@ -922,8 +922,10 @@ def upsert_user_rating(user_id):
 def get_posts():
     q = request.args.get("q", "").strip()
     sort = request.args.get("sort", "id_desc").lower()
-    category = request.args.get("category", "").strip()
+    category_param = request.args.get("category", "").strip()
+    type_param = request.args.get("type", "").strip()
     author_id = request.args.get("author_id", "").strip()
+    role_filter_raw = request.args.get("role", "").strip()
 
     try:
         page = max(1, int(request.args.get("page", 1)))
@@ -948,9 +950,27 @@ def get_posts():
         where = ["1=1"]
         params = []
 
-        if category:
-            where.append("p.category = %s")
-            params.append(category)
+        # multiple category/type values allowed, comma-separated
+        category_values = []
+        for raw in (category_param, type_param):
+            if raw:
+                category_values.extend([val.strip() for val in raw.split(",") if val.strip()])
+        if category_values:
+            category_values = list(dict.fromkeys(category_values))
+            placeholders = ", ".join(["%s"] * len(category_values))
+            where.append(f"p.category IN ({placeholders})")
+            params.extend(category_values)
+
+        allowed_roles = {"user_dobrovolnik", "user_firma", "user_senior"}
+        role_aliases = {
+            "dobrovolnik": "user_dobrovolnik",
+            "firma": "user_firma",
+            "senior": "user_senior",
+        }
+        role_filter = role_aliases.get(role_filter_raw.lower(), role_filter_raw) if role_filter_raw else ""
+        if role_filter and role_filter in allowed_roles:
+            where.append("u.rola = %s")
+            params.append(role_filter)
         if author_id:
             where.append("p.user_id = %s")
             params.append(author_id)
@@ -962,20 +982,27 @@ def get_posts():
             like_prefix = f"{q}%"
             fullname = "CONCAT(u.meno,' ',u.priezvisko)"
             where.append(
-                "(p.title LIKE %s OR p.description LIKE %s OR p.category LIKE %s OR "
+                "(p.title LIKE %s OR p.description LIKE %s OR p.category LIKE %s OR u.rola LIKE %s OR "
                 f"{fullname} LIKE %s)"
             )
-            params += [like_any, like_any, like_any, like_any]
+            params += [like_any, like_any, like_any, like_any, like_any]
             score_sql = f"""
                 (CASE WHEN p.title = %s THEN 120 ELSE 0 END) +
                 (CASE WHEN p.title LIKE %s THEN 80 ELSE 0 END) +
                 (CASE WHEN p.description LIKE %s THEN 40 ELSE 0 END) +
                 (CASE WHEN p.category LIKE %s THEN 30 ELSE 0 END) +
+                (CASE WHEN u.rola LIKE %s THEN 28 ELSE 0 END) +
                 (CASE WHEN {fullname} LIKE %s THEN 25 ELSE 0 END) +
                 (CASE WHEN p.title LIKE %s THEN 10 ELSE 0 END) +
-                (CASE WHEN p.description LIKE %s THEN 6 ELSE 0 END)
+                (CASE WHEN p.description LIKE %s THEN 6 ELSE 0 END) +
+                (CASE WHEN p.category LIKE %s THEN 5 ELSE 0 END) +
+                (CASE WHEN u.rola LIKE %s THEN 4 ELSE 0 END)
             """
-            score_params = [q, like_prefix, like_prefix, like_prefix, like_prefix, like_any, like_any]
+            score_params = [
+                q,
+                like_prefix, like_prefix, like_prefix, like_prefix, like_prefix,
+                like_any, like_any, like_any, like_any,
+            ]
             sort_sql = "score DESC, p.title ASC, p.id_post DESC"
 
         where_sql = " AND ".join(where)
@@ -1000,7 +1027,7 @@ def get_posts():
             cur.execute(f"""
                 SELECT p.id_post, p.title, p.description, p.image, p.category, p.user_id,
                        u.meno AS name, u.priezvisko AS surname,
-                       r.avg_rating,
+                       r.avg_rating, u.rola,
                        {score_sql} AS score
                 FROM posts p
                 JOIN users u ON u.id_user = p.user_id
@@ -1008,11 +1035,11 @@ def get_posts():
                 WHERE {where_sql}
                 ORDER BY {sort_sql}
                 LIMIT %s OFFSET %s
-            """, params + score_params + [page_size, offset])
+            """, score_params + params + [page_size, offset])
         else:
             cur.execute(f"""
                 SELECT p.id_post, p.title, p.description, p.image, p.category, p.user_id,
-                       u.meno AS name, u.priezvisko AS surname,
+                       u.meno AS name, u.priezvisko AS surname, u.rola,
                        r.avg_rating
                 FROM posts p
                 JOIN users u ON u.id_user = p.user_id
@@ -1024,7 +1051,7 @@ def get_posts():
 
         rows = cur.fetchall()
 
-        if not q and not category and not author_id:
+        if not q and not category_values and not role_filter and not author_id:
             return jsonify(rows), 200
 
         return jsonify({

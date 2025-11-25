@@ -28,6 +28,7 @@ interface Post {
   name: string;
   surname: string;
   user_id: number;
+  rola?: string;
   avg_rating?: number | null;
 }
 
@@ -51,6 +52,29 @@ const categoryImageMap: Record<string, string> = {
   ine: ineImg,
 };
 
+const ROLE_FILTER_OPTIONS = [
+  { value: "all", label: "Vsetci" },
+  { value: "user_dobrovolnik", label: "Dobrovolnici" },
+  { value: "user_firma", label: "Firmy" },
+  { value: "user_senior", label: "Seniori" },
+];
+
+const CATEGORY_FILTER_OPTIONS = [
+  { value: "all", label: "Vsetky typy" },
+  { value: "dobrovolnictvo", label: "Dobrovolnictvo" },
+  { value: "vzdelavanie", label: "Vzdelavanie" },
+  { value: "pomoc_seniorom", label: "Pomoc seniorom" },
+  { value: "spolocenska_aktivita", label: "Spolocenska aktivita" },
+  { value: "ine", label: "Ine" },
+];
+
+const SORT_OPTIONS = [
+  { value: "id_desc", label: "Najnovsie" },
+  { value: "id_asc", label: "Najstarsie" },
+  { value: "title_asc", label: "Nazov A-Z" },
+  { value: "title_desc", label: "Nazov Z-A" },
+];
+
 const normalizeCategory = (value: string) =>
   value
     .normalize("NFD")
@@ -68,104 +92,83 @@ const resolveImage = (post: Post) => {
 export default function Posts() {
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
-  const [allPosts, setAllPosts] = useState<Post[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [user, setUser] = useState<User | null>(null);
 
   const [q, setQ] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [sortOption, setSortOption] = useState("id_desc");
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const debounceRef = useRef<number | null>(null);
-  const controllerRef = useRef<AbortController | null>(null);
-  const lastIssuedTermRef = useRef<string>("");
 
   useEffect(() => {
     const storedUser = localStorage.getItem("user");
     if (storedUser) setUser(JSON.parse(storedUser));
   }, []);
 
-const loadInitial = async () => {
+  const fetchPosts = async (signal?: AbortSignal) => {
+    const term = q.trim();
+    const usingSearch = term.length > 0;
+
+    const qs = new URLSearchParams({
+      page: "1",
+      page_size: "50",
+      sort: usingSearch ? "relevance" : sortOption,
+    });
+    if (usingSearch) qs.set("q", term);
+    if (roleFilter !== "all") qs.set("role", roleFilter);
+    if (categoryFilter !== "all") {
+      qs.set("category", categoryFilter);
+      qs.set("type", categoryFilter);
+    }
+
     try {
-      setLoading(true);
+      if (!hasLoadedOnce) setLoading(true);
+      setSearching(usingSearch);
       setError(null);
-      const res = await fetch(`${API_BASE}/api/posts`);
-      if (!res.ok) throw new Error("Chyba pri nacitani prispevkov");
+
+      const res = await fetch(`${API_BASE}/api/posts?${qs.toString()}`, {
+        signal,
+      });
+      if (!res.ok) throw new Error(await res.text());
+
       const data: PostsApiResp = await res.json();
       const items = Array.isArray(data) ? data : data.items;
       setPosts(items ?? []);
-      setAllPosts(items ?? []);
-    } catch (err: any) {
-      setError(err.message || "Chyba nacitania");
+      setHasLoadedOnce(true);
+    } catch (e: any) {
+      if (e.name === "AbortError") return;
+      setError(e.message || "Chyba pri nacitani prispevkov");
       setPosts([]);
     } finally {
       setLoading(false);
+      setSearching(false);
     }
   };
 
   useEffect(() => {
-    loadInitial();
-  }, []);
-
-  useEffect(() => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
 
+    const ctrl = new AbortController();
     debounceRef.current = window.setTimeout(async () => {
-      const term = q.trim();
-
-      if (!term) {
-        if (controllerRef.current) controllerRef.current.abort();
-        setPosts(allPosts);
-        setSearching(false);
-        return;
-      }
-
-      if (controllerRef.current) controllerRef.current.abort();
-      const ctrl = new AbortController();
-      controllerRef.current = ctrl;
-
-      try {
-        setSearching(true);
-        setError(null);
-        lastIssuedTermRef.current = term;
-        const qs = new URLSearchParams({
-          q: term,
-          page: "1",
-          page_size: "50",
-          sort: "relevance",
-        });
-        const res = await fetch(`${API_BASE}/api/posts?${qs.toString()}`, {
-          signal: ctrl.signal,
-        });
-        if (!res.ok) throw new Error(await res.text());
-        const data: PostsApiResp = await res.json();
-        if (lastIssuedTermRef.current !== term) return;
-
-        const items = Array.isArray(data) ? data : data.items;
-        setPosts(items ?? []);
-      } catch (e: any) {
-        if (e.name === "AbortError") return;
-        setError(e.message || "Chyba pri vyhladavani");
-        setPosts([]);
-      } finally {
-        if (lastIssuedTermRef.current === term) setSearching(false);
-      }
+      await fetchPosts(ctrl.signal);
     }, 250);
 
     return () => {
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
+      ctrl.abort();
     };
-  }, [q, allPosts]);
+  }, [q, roleFilter, categoryFilter, sortOption]);
 
   const refreshAfterChange = async () => {
-    if (q.trim()) {
-      setQ((prev) => prev);
-      return;
-    }
-    await loadInitial();
+    await fetchPosts();
   };
 
   const handleAddPost = async (postData: {
@@ -258,28 +261,84 @@ const loadInitial = async () => {
     <MainLayout>
       <div className="max-w-6xl mx-auto p-8 space-y-8">
         <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-5 shadow-sm">
-          <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:gap-4">
-            <div className="relative">
-              <input
-                id="post-search"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Hladaj nazov, popis, kategoriu alebo autora..."
-                className="w-full border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                aria-label="Vyhladavanie prispevkov"
-              />
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500 dark:text-gray-400 pointer-events-none">
-                {searching ? "Hladam..." : q.trim() ? `Vysledky: ${posts.length}` : `Prispevkov: ${posts.length}`}
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:gap-4">
+              <div className="relative">
+                <input
+                  id="post-search"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Hladaj nazov, popis, kategoriu alebo autora..."
+                  className="w-full border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  aria-label="Vyhladavanie prispevkov"
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg pointer-events-none">
+                  ?
+                </span>
               </div>
+              {user && (
+                <button
+                  onClick={() => setIsCreating(true)}
+                  className="sm:justify-self-end bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl shadow-md transition shrink-0"
+                >
+                  + Pridat prispevok
+                </button>
+              )}
             </div>
-            {user && (
-              <button
-                onClick={() => setIsCreating(true)}
-                className="sm:justify-self-end bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl shadow-md transition shrink-0"
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <select
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value)}
+                className="w-full border rounded-2xl px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:border-gray-700"
+                aria-label="Filter role autora"
               >
-                + Pridat prispevok
-              </button>
-            )}
+                {ROLE_FILTER_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="w-full border rounded-2xl px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:border-gray-700"
+                aria-label="Filter podla typu prispevku"
+              >
+                {CATEGORY_FILTER_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={sortOption}
+                onChange={(e) => setSortOption(e.target.value)}
+                className="w-full border rounded-2xl px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:border-gray-700"
+                aria-label="Triedenie prispevkov"
+              >
+                {SORT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center justify-between">
+              <span>
+                {searching
+                  ? "Hladam..."
+                  : q.trim()
+                  ? `Vysledky: ${posts.length}`
+                  : `Prispevkov: ${posts.length}`}
+              </span>
+              {roleFilter !== "all" || categoryFilter !== "all" ? (
+                <span className="text-[11px] text-indigo-600 dark:text-indigo-300">
+                  Aktivne filtre
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
 
