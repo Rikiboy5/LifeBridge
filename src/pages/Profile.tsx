@@ -4,6 +4,11 @@ import CardCreator from "../components/CardCreator";
 import Card from "../components/Card";
 import UserRatingsSection from "../components/UserRatingsSection";
 import MainLayout from "../layouts/MainLayout";
+import dobrovolnictvoImg from "../assets/dobrovolnictvo.png";
+import vzdelavanieImg from "../assets/vzdelavanie.png";
+import pomocSenioromImg from "../assets/pomoc_seniorom.png";
+import spolocenskaAktivitaImg from "../assets/spolocenska_aktivita.png";
+import ineImg from "../assets/ine.png";
 
 type User = {
   id_user: number;
@@ -48,6 +53,28 @@ const ROLE_LABELS: Record<string, string> = {
 
 const formatRole = (role?: string | null) =>
   ROLE_LABELS[role ?? ""] || "Používateľ";
+
+const categoryImageMap: Record<string, string> = {
+  dobrovolnictvo: dobrovolnictvoImg,
+  vzdelavanie: vzdelavanieImg,
+  pomocseniorom: pomocSenioromImg,
+  spolocenskaaktivita: spolocenskaAktivitaImg,
+  ine: ineImg,
+};
+
+const normalizeCategory = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+
+const resolveImage = (post: Post) => {
+  const provided = post.image?.trim();
+  if (provided) return provided;
+  const normalized = normalizeCategory(post.category || "");
+  return categoryImageMap[normalized] ?? categoryImageMap.ine;
+};
 
 // helper: normalize to YYYY-MM-DD
 const onlyDate = (val: string | null | undefined): string => {
@@ -669,9 +696,10 @@ export default function Profile() {
                     <Card
                       title={p.title}
                       description={p.description}
-                      image={p.image || undefined}
+                      image={resolveImage(p)}
                       author={`${p.name} ${p.surname}`}
                       category={p.category}
+                      onClick={() => navigate(`/posts/${p.id_post}`)}
                     />
                     {canEditProfile && (
                       <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition">
