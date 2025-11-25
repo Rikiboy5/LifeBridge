@@ -9,6 +9,10 @@ import Blog from "./pages/Blog";
 import ActivityDetail from "./pages/ActivityDetail";
 import CreateActivity from "./pages/CreateActivity";
 import PublicProfile from "./pages/PublicProfile";
+import ArticleDetail from "./pages/ArticleDetail";
+import NewArticle from "./pages/NewArticle";
+
+
 
 // pomocná funkcia – zistí, či je prihlásený admin
 function isCurrentUserAdmin(): boolean {
@@ -46,6 +50,9 @@ export default function App() {
         <Route path="/activities" element={<Blog />} />
         <Route path="/activities/create" element={<CreateActivity />} />
         <Route path="/activities/:id" element={<ActivityDetail />} />
+        <Route path="/article/:id" element={<ArticleDetail />} />
+        <Route path="/articles/new" element={<NewArticle />} />
+
       </Routes>
     </Router>
   );

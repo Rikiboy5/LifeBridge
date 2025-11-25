@@ -1,13 +1,10 @@
 import React, { useEffect, useState, useRef } from "react";
 import MainLayout from "../layouts/MainLayout";
-import Card from "../components/Card";
+import Article from "../components/Article";
 import Map from "../components/Map";
 import { Link } from "react-router-dom";
 
-import Garden from "../assets/img/garden.png";
-import Britain from "../assets/img/gb.png";
-import laptop from "../assets/img/laptop.png";
-
+// ---- TYPES ----
 interface Activity {
   id_activity: number;
   title: string;
@@ -17,6 +14,7 @@ interface Activity {
   attendees_count: number;
   lat: number;
   lng: number;
+  category?: string; // FIX – optional category
 }
 
 interface TopUser {
@@ -29,82 +27,62 @@ interface TopUser {
   rating_count?: number | null;
 }
 
+interface ArticleType {
+  id_article: number;
+  title: string;
+  text: string;
+  image_url?: string | null;
+  created_at?: string;
+}
+
 export default function Home() {
-  const offers = [
-    {
-      id: 1,
-      title: "Pomoc so záhradou",
-      description:
-        "Pomôžem s jarným upratovaním dvora, trávnika a výsadbou rastlín 🌱",
-      image: Garden,
-      author: "Ján Novák",
-      location: "Bratislava",
-      category: "Dobrovoľníctvo",
-    },
-    {
-      id: 2,
-      title: "Doučovanie angličtiny",
-      description:
-        "Ponúkam online aj osobné doučovanie angličtiny pre začiatočníkov 🇬🇧",
-      image: Britain,
-      author: "Mária Kováčová",
-      location: "Košice",
-      category: "Vzdelávanie",
-    },
-    {
-      id: 3,
-      title: "Pomoc seniorom s technológiami",
-      description:
-        "Pomôžem seniorom s používaním mobilu, počítača alebo internetu 💻",
-      image: laptop,
-      author: "Jozef Hrubý",
-      location: "Trnava",
-      category: "Dobrovoľníctvo",
-    },
-  ];
-
-  const pins = [
-    {
-      id: 1,
-      name: "Ján Novák",
-      lat: 48.1486,
-      lng: 17.1077,
-      description: "Pomoc so záhradou",
-    },
-    {
-      id: 2,
-      name: "Mária Kováčová",
-      lat: 48.7164,
-      lng: 21.2611,
-      description: "Doučovanie angličtiny",
-    },
-    {
-      id: 3,
-      name: "Jozef Hrubý",
-      lat: 48.377,
-      lng: 17.588,
-      description: "Pomoc s technológiami",
-    },
-  ];
-
+  // ---- STATES ----
   const [activities, setActivities] = useState<Activity[]>([]);
   const [error, setError] = useState<string | null>(null);
+
   const [topUsers, setTopUsers] = useState<TopUser[]>([]);
   const [topError, setTopError] = useState<string | null>(null);
+
+  const [articles, setArticles] = useState<ArticleType[]>([]);
+  const [articlesError, setArticlesError] = useState<string | null>(null);
+
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
+  // ---- LOAD ARTICLES ----
+
+  const storedUser = JSON.parse(localStorage.getItem("user") || "null");
+  const isAdmin = storedUser?.role === "admin";
+  useEffect(() => {
+    (async () => {
+      try {
+        setArticlesError(null);
+        const res = await fetch("/api/articles"); // cez Vite proxy
+        if (!res.ok) throw new Error("Nepodarilo sa načítať články");
+
+        const data = await res.json();
+        setArticles(Array.isArray(data) ? data : []);
+      } catch (e: any) {
+        setArticlesError(e.message || "Chyba pri načítaní článkov");
+      }
+    })();
+  }, []);
+
+  // ---- LOAD ACTIVITIES ----
   useEffect(() => {
     (async () => {
       try {
         setError(null);
-        const res = await fetch("http://127.0.0.1:5000/api/activities?page_size=12");
+        const res = await fetch("/api/activities?page_size=50");
         const data = await res.json();
+
         const items = Array.isArray(data) ? data : data.items ?? [];
+
         const normalized = items.map((a: any) => ({
           ...a,
           lat: Number(a.lat),
           lng: Number(a.lng),
         }));
+
         setActivities(normalized);
       } catch (e: any) {
         setError(e.message || "Nepodarilo sa načítať aktivity");
@@ -112,26 +90,41 @@ export default function Home() {
     })();
   }, []);
 
+  // ---- LOAD TOP USERS ----
   useEffect(() => {
     (async () => {
       try {
         setTopError(null);
         const res = await fetch("/api/users/top-rated?limit=6&days=7");
-        if (!res.ok) throw new Error("Nepodarilo sa nacitat najlepsie hodnotenych");
+        if (!res.ok) throw new Error("Nepodarilo sa načítať");
+
         const data: TopUser[] = await res.json();
         setTopUsers(Array.isArray(data) ? data : []);
       } catch (e: any) {
-        setTopError(e.message || "Nepodarilo sa nacitat najlepsie hodnotenych");
+        setTopError(e.message || "Nepodarilo sa načítať najlepších používateľov");
       }
     })();
   }, []);
 
+  // ---- SCROLL FUNCTION ----
   const scrollBy = (dir: 1 | -1) => {
     const el = scrollerRef.current;
     if (!el) return;
     const amount = el.clientWidth * 0.8;
     el.scrollBy({ left: dir * amount, behavior: "smooth" });
   };
+
+  // ---- DYNAMIC MAP PINS ----
+  const dynamicPins = activities.map((a) => ({
+    id: a.id_activity,
+    name: a.title,
+    lat: a.lat,
+    lng: a.lng,
+    description: a.description || "",
+    category: a.category ?? "default",
+  }));
+
+
 
   return (
     <MainLayout>
@@ -140,7 +133,7 @@ export default function Home() {
           🌉 Ponuky používateľov LifeBridge
         </h1>
 
-        {/* === Carousel sekcia === */}
+        {/* === CAROUSEL === */}
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-semibold">Nadchádzajúce aktivity</h2>
@@ -153,40 +146,31 @@ export default function Home() {
             <div className="text-red-600 text-sm">{error}</div>
           ) : (
             <div className="relative max-w-5xl mx-auto">
-              {/* Šípky */}
+              {/* Ľavá šípka */}
               <button
                 type="button"
                 aria-label="Posun doľava"
                 onClick={() => scrollBy(-1)}
                 className="absolute left-0 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-white/90 dark:bg-gray-800/90 shadow hover:bg-blue-600 hover:text-white transition"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  className="h-5 w-5"
-                >
+                <svg viewBox="0 0 24 24" className="h-5 w-5">
                   <path d="M15.75 19.5 8.25 12l7.5-7.5" />
                 </svg>
               </button>
 
+              {/* Pravá šípka */}
               <button
                 type="button"
                 aria-label="Posun doprava"
                 onClick={() => scrollBy(1)}
                 className="absolute right-0 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-white/90 dark:bg-gray-800/90 shadow hover:bg-blue-600 hover:text-white transition"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  className="h-5 w-5"
-                >
+                <svg viewBox="0 0 24 24" className="h-5 w-5">
                   <path d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                 </svg>
               </button>
 
-              {/* Carousel */}
+              {/* SLIDER */}
               <div
                 ref={scrollerRef}
                 className="flex overflow-x-auto gap-6 pb-4 snap-x snap-mandatory scroll-smooth scrollbar-hide"
@@ -199,16 +183,10 @@ export default function Home() {
                   >
                     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
                       {a.image_url && (
-                        <img
-                          src={a.image_url}
-                          alt={a.title}
-                          className="w-full h-56 object-cover"
-                        />
+                        <img src={a.image_url} alt={a.title} className="w-full h-56 object-cover" />
                       )}
                       <div className="p-4 space-y-2">
-                        <h3 className="text-lg font-medium line-clamp-1">
-                          {a.title}
-                        </h3>
+                        <h3 className="text-lg font-medium line-clamp-1">{a.title}</h3>
                         {a.description && (
                           <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
                             {a.description}
@@ -221,33 +199,54 @@ export default function Home() {
                     </div>
                   </Link>
                 ))}
-                {activities.length === 0 && (
-                  <div className="text-gray-500 text-sm p-4">
-                    Zatiaľ žiadne aktivity. Vytvor na stránke Blog.
-                  </div>
-                )}
               </div>
             </div>
           )}
         </section>
 
-        {/* === Mapa === */}
-        <Map pins={pins} />
+        {/* === ARTICLES === */}
+        
 
-        {/* === Statické ponuky === */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-          {offers.map((offer) => (
-            <Card
-              key={offer.id}
-              title={offer.title}
-              description={offer.description}
-              image={offer.image}
-              author={offer.author}
-              category={offer.category}
-            />
-          ))}
-        </div>
+        <section className="space-y-6 mt-10">
+          <h2 className="text-2xl font-semibold">Edukačné články</h2>
 
+          {articlesError && <p className="text-red-500">{articlesError}</p>}
+
+          {articles.length === 0 && !articlesError && (
+            <p className="text-gray-500">Zatiaľ nemáme žiadne články.</p>
+          )}
+
+          <div className="space-y-4">
+            {articles.map((a) => (
+              <Article
+                key={a.id_article}
+                id={a.id_article}
+                title={a.title}
+                text={a.text}
+                image={a.image_url ?? undefined}
+              />
+            ))}
+          </div>
+          <div className="flex justify-end">
+ {isAdmin && (
+  <div className="flex justify-end">
+    <Link
+      to="/articles/new"
+      className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition"
+    >
+      ➕ Pridať článok
+    </Link>
+  </div>
+)}
+
+</div>
+
+        </section>
+
+        {/* === MAP === */}
+        <Map pins={dynamicPins} />
+
+        {/* === TOP USERS === */}
         <section className="bg-white dark:bg-gray-900 rounded-2xl shadow-md p-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
@@ -260,13 +259,10 @@ export default function Home() {
               Zobraziť všetkých
             </Link>
           </div>
-          {topError ? (
-            <p className="mt-4 text-sm text-red-500">{topError}</p>
-          ) : topUsers.length === 0 ? (
-            <p className="mt-4 text-sm text-gray-500">
-              Zatiaľ nemáme dosť hodnotení pre zobrazenie rebríčka.
-            </p>
-          ) : (
+
+          {topError && <p className="text-red-500 mt-4">{topError}</p>}
+
+          {topUsers.length > 0 && (
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               {topUsers.map((user, index) => (
                 <div
@@ -282,9 +278,11 @@ export default function Home() {
                     </p>
                     <p className="text-sm text-gray-500">{user.mail}</p>
                     <div className="text-sm text-yellow-500 flex items-center gap-1 mt-1">
-                      <span aria-hidden="true">{"\u2605"}</span>
+                      <span>★</span>
                       <span>{(user.avg_rating ?? 0).toFixed(1)}</span>
-                      <span className="text-xs text-gray-500">({user.rating_count ?? 0})</span>
+                      <span className="text-xs text-gray-500">
+                        ({user.rating_count ?? 0})
+                      </span>
                     </div>
                   </div>
                 </div>

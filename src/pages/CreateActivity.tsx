@@ -55,7 +55,7 @@ export default function CreateActivity() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
-          user_id: user.id_user,
+          user_id: user.id,
         }),
       });
       const data = await res.json();
