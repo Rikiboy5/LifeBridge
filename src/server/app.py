@@ -1485,6 +1485,71 @@ def list_activities():
         conn.close()
 
 
+import requests
+import logging
+GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
+
+import requests
+import logging
+
+GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
+
+def geocode_address(address: str):
+    params = {
+        "q": address,
+        "format": "json",
+        "limit": 1,
+        "addressdetails": 1,
+    }
+    headers = {
+        "User-Agent": "LifeBridgeApp/1.0 (contact@lifebridge.sk)"
+    }
+
+    try:
+        resp = requests.get(GEOCODE_URL, params=params, headers=headers, timeout=10)
+    except requests.RequestException as e:
+        logging.exception(f"Geocode request failed: {e}")
+        raise ValueError("Nepodarilo sa kontaktovať geokódovaciu službu.")
+
+    if resp.status_code != 200:
+        logging.warning(f"Nominatim HTTP {resp.status_code}: {resp.text[:200]}")
+        raise ValueError("Geokódovanie zlyhalo (chyba služby).")
+
+    try:
+        data = resp.json()
+    except ValueError:
+        logging.warning(f"Nominatim vrátil neplatný JSON: {resp.text[:200]}")
+        raise ValueError("Geokódovanie vrátilo neplatnú odpoveď.")
+
+    if not isinstance(data, list) or len(data) == 0:
+        logging.info(f"Nominatim nenašiel výsledky pre adresu: {address}")
+        raise ValueError("Pre zadanú adresu sa nenašli žiadne súradnice.")
+
+    first = data[0]
+    logging.info(f"Nominatim response for '{address}': {first}")  # DEBUG log
+    
+    lat_str = first.get("lat")
+    lon_str = first.get("lon")
+    
+    if not lat_str or not lon_str:
+        logging.warning(f"Missing lat/lon in response: {first}")
+        raise ValueError("Geokódovanie vrátilo neúplné súradnice.")
+    
+    try:
+        lat = float(lat_str)
+        lng = float(lon_str)
+    except (ValueError, TypeError) as e:
+        logging.warning(f"Chyba pri parsovaní súradníc lat={lat_str}, lon={lon_str}: {e}")
+        raise ValueError("Geokódovanie vrátilo neplatné súradnice.")
+    
+    # Extra validácia rozsahu
+    if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+        logging.warning(f"Súradnice mimo rozsahu: lat={lat}, lon={lng}")
+        raise ValueError("Geokódovanie vrátilo súradnice mimo platného rozsahu.")
+
+    return lat, lng
+
+
 @app.post("/api/activities")
 def create_activity():
     data = request.get_json()
@@ -1492,18 +1557,28 @@ def create_activity():
     description = data.get("description")
     image_url = data.get("image_url")
     capacity = data.get("capacity")
-    lat = data.get("lat")
-    lng = data.get("lng")
     user_id = data.get("user_id")
+    address = data.get("address")  # nový vstup z frontendu
 
     if not title or len(title.strip()) == 0:
         return jsonify({"error": "Názov je povinný."}), 400
     if not isinstance(capacity, int) or capacity < 1:
         return jsonify({"error": "Neplatná kapacita."}), 400
-    if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
-        return jsonify({"error": "Neplatné súradnice."}), 400
     if not user_id:
         return jsonify({"error": "Nepodarilo sa identifikovať používateľa."}), 400
+    if not address or len(address.strip()) == 0:
+        return jsonify({"error": "Adresa je povinná."}), 400
+
+    try:
+        lat, lng = geocode_address(address)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        return jsonify({"error": "Nepodarilo sa získať súradnice z adresy."}), 502
+
+    # validácia výsledných súradníc (pre istotu)
+    if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+        return jsonify({"error": "Geokódovanie vrátilo neplatné súradnice."}), 400
 
     conn = get_conn()
     try:
@@ -1518,9 +1593,10 @@ def create_activity():
         row = cur.fetchone()
         keys = [desc[0] for desc in cur.description]
         activity = dict(zip(keys, row))
-        return jsonify(activity)
+        return jsonify(activity), 201
     finally:
         conn.close()
+
 
 
 @app.post("/api/activities/<int:activity_id>/signup")

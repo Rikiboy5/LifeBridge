@@ -38,11 +38,18 @@ type Hobby = {
   id_kategoria: number;
   kategoria_nazov?: string;
 };
+
 type Category = {
   id_kategoria: number;
   nazov: string;
   ikona?: string;
   pocet_hobby?: number;
+};
+
+type CitySuggestion = {
+  display_name: string;
+  lat: string;
+  lon: string;
 };
 
 const ROLE_LABELS: Record<string, string> = {
@@ -76,7 +83,6 @@ const resolveImage = (post: Post) => {
   return categoryImageMap[normalized] ?? categoryImageMap.ine;
 };
 
-// helper: normalize to YYYY-MM-DD
 const onlyDate = (val: string | null | undefined): string => {
   if (!val) return "";
   const s = String(val).trim();
@@ -115,10 +121,18 @@ export default function Profile() {
     about: "",
   });
 
+  // autocomplete na mesto
+  const [citySuggestions, setCitySuggestions] = useState<CitySuggestion[]>([]);
+  const [showCitySuggestions, setShowCitySuggestions] = useState(false);
+  const [isLoadingCitySuggestions, setIsLoadingCitySuggestions] = useState(false);
+  const cityDebounceRef = useRef<number | null>(null);
+  const citySuggestionRef = useRef<HTMLDivElement | null>(null);
+  const [cityInputValue, setCityInputValue] = useState("");
+  const [cityValidated, setCityValidated] = useState(false);
+
   const baseUrl =
     (import.meta as any).env?.VITE_API_URL ?? "http://127.0.0.1:5000";
 
-  // prihlásený používateľ z localStorage
   const currentUserId = useMemo<number | null>(() => {
     try {
       const raw = localStorage.getItem("user");
@@ -144,7 +158,6 @@ export default function Profile() {
   const { id } = useParams<{ id?: string }>();
   const navigate = useNavigate();
 
-  // koho profil pozeráme: /user/:id alebo vlastný profil (/profil)
   const viewedUserId = useMemo<number | null>(() => {
     if (id) {
       const parsed = Number(id);
@@ -154,12 +167,11 @@ export default function Profile() {
   }, [id, currentUserId]);
 
   const viewerIsAdmin =
-    currentUserRole === "admin" || currentUserId === 1 /* superadmin */;
+    currentUserRole === "admin" || currentUserId === 1;
   const isOwnProfile =
     !!currentUserId && !!viewedUserId && currentUserId === viewedUserId;
   const canEditProfile = !!profile && (isOwnProfile || viewerIsAdmin);
 
-  // načítaj profil
   useEffect(() => {
     if (!viewedUserId) return;
     fetch(`${baseUrl}/api/profile/${viewedUserId}`)
@@ -177,11 +189,12 @@ export default function Profile() {
           mesto: data.mesto ?? "",
           about: data.about ?? "",
         });
+        setCityInputValue(data.mesto ?? "");
+        setCityValidated(true); // existujúce mesto je validované
       })
       .catch((e) => console.error("Chyba pri načítaní profilu:", e));
   }, [viewedUserId, baseUrl]);
 
-  // načítaj hobby + kategórie + hobby konkrétneho používateľa
   useEffect(() => {
     if (!viewedUserId) return;
     (async () => {
@@ -236,7 +249,6 @@ export default function Profile() {
     }
   };
 
-  // načítaj príspevky používateľa, ktorého profil pozeráme
   const fetchMyPosts = async () => {
     if (!viewedUserId) return;
     try {
@@ -264,7 +276,6 @@ export default function Profile() {
     }
   }, [viewedUserId]);
 
-  // načítaj avatar
   useEffect(() => {
     if (!viewedUserId) return;
     (async () => {
@@ -333,8 +344,103 @@ export default function Profile() {
     );
   };
 
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        citySuggestionRef.current &&
+        !citySuggestionRef.current.contains(e.target as Node)
+      ) {
+        setShowCitySuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const fetchCitySuggestions = async (query: string) => {
+    setIsLoadingCitySuggestions(true);
+    try {
+      const url =
+        "https://nominatim.openstreetmap.org/search" +
+        `?q=${encodeURIComponent(query)}` +
+        "&format=json&limit=8&addressdetails=1&accept-language=sk";
+
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "LifeBridge App",
+        },
+      });
+
+      if (!res.ok) {
+        setCitySuggestions([]);
+        setShowCitySuggestions(false);
+        return;
+      }
+
+      const data = await res.json();
+      if (!data || data.length === 0) {
+        setCitySuggestions([]);
+        setShowCitySuggestions(false);
+        return;
+      }
+
+      const formatted: CitySuggestion[] = data.map((item: any) => {
+        const addr = item.address || {};
+        const cityName =
+          addr.city || addr.town || addr.village || item.display_name;
+        const country = addr.country ? `, ${addr.country}` : "";
+        return {
+          display_name: `${cityName}${country}`,
+          lat: item.lat,
+          lon: item.lon,
+        };
+      });
+
+      setCitySuggestions(formatted);
+      setShowCitySuggestions(formatted.length > 0);
+    } catch (e) {
+      console.error("Chyba pri načítaní návrhov mesta:", e);
+      setCitySuggestions([]);
+      setShowCitySuggestions(false);
+    } finally {
+      setIsLoadingCitySuggestions(false);
+    }
+  };
+
+  const handleCityInputChange = (value: string) => {
+    setCityInputValue(value);
+    setCityValidated(false); // resetuj validáciu pri zmene
+    if (cityDebounceRef.current) {
+      window.clearTimeout(cityDebounceRef.current);
+    }
+    if (value.trim().length < 2) {
+      setCitySuggestions([]);
+      setShowCitySuggestions(false);
+      return;
+    }
+    cityDebounceRef.current = window.setTimeout(() => {
+      fetchCitySuggestions(value);
+    }, 500);
+  };
+
+  const handleCitySuggestionClick = (s: CitySuggestion) => {
+    const parts = s.display_name.split(",");
+    const cityOnly = parts[0].trim();
+    setForm((f) => ({ ...f, mesto: cityOnly }));
+    setCityInputValue(cityOnly);
+    setCityValidated(true); // označíme ako validované
+    setShowCitySuggestions(false);
+    setCitySuggestions([]);
+  };
+
   const handleSave = async () => {
     if (!profile || !canEditProfile) return;
+    
+    if (!cityValidated || !form.mesto || form.mesto.trim().length === 0) {
+      alert("Mesto je povinné. Vyberte mesto zo zoznamu návrhov.");
+      return;
+    }
+
     setSaving(true);
     try {
       const changed: Record<string, any> = {};
@@ -479,7 +585,6 @@ export default function Profile() {
     }
   };
 
-  // keď nie je koho zobraziť (napr. neprihlásený na /profil)
   if (!viewedUserId) {
     return (
       <MainLayout>
@@ -740,7 +845,7 @@ export default function Profile() {
         {/* Editor profilu (modal) */}
         {isEditing && profile && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="w-full max-w-xl bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6">
+            <div className="w-full max-w-xl bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 max-h-[90vh] overflow-y-auto">
               <h3 className="text-xl font-semibold mb-4">
                 Upraviť profil
               </h3>
@@ -831,15 +936,77 @@ export default function Profile() {
                       }
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm mb-1">Mesto</label>
+                  <div className="relative" ref={citySuggestionRef}>
+                    <label className="block text-sm mb-1">
+                      Mesto * 
+                      {!cityValidated && cityInputValue && (
+                        <span className="text-red-500 text-xs ml-2">
+                          (Vyberte zo zoznamu)
+                        </span>
+                      )}
+                    </label>
                     <input
-                      className="w-full rounded-lg border px-3 py-2 bg-white dark:bg-gray-900"
-                      value={form.mesto}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, mesto: e.target.value }))
+                      className={`w-full rounded-lg border px-3 py-2 bg-white dark:bg-gray-900 ${
+                        !cityValidated && cityInputValue
+                          ? "border-red-500"
+                          : ""
+                      }`}
+                      value={cityInputValue}
+                      onChange={(e) => handleCityInputChange(e.target.value)}
+                      onFocus={() =>
+                        citySuggestions.length > 0 &&
+                        setShowCitySuggestions(true)
                       }
+                      autoComplete="off"
+                      placeholder="Začni písať mesto..."
+                      required
                     />
+
+                    {isLoadingCitySuggestions && (
+                      <div className="absolute right-3 top-9 text-gray-400">
+                        <svg
+                          className="animate-spin h-4 w-4"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                            fill="none"
+                          />
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          />
+                        </svg>
+                      </div>
+                    )}
+
+                    {showCitySuggestions && citySuggestions.length > 0 && (
+                      <div className="absolute z-20 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                        {citySuggestions.map((s, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() =>
+                              handleCitySuggestionClick(s)
+                            }
+                            className="w-full text-left px-4 py-2 hover:bg-blue-50 dark:hover:bg-gray-700 border-b border-gray-200 dark:border-gray-700 last:border-b-0 text-sm"
+                          >
+                            📍 {s.display_name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {cityValidated
+                        ? "✓ Mesto vybrané zo zoznamu"
+                        : "Vyberte mesto zo zoznamu návrhov"}
+                    </p>
                   </div>
                 </div>
 
@@ -858,7 +1025,12 @@ export default function Profile() {
 
               <div className="mt-6 flex items-center justify-end gap-3">
                 <button
-                  onClick={() => setIsEditing(false)}
+                  onClick={() => {
+                    setIsEditing(false);
+                    // resetuj validáciu pri zrušení
+                    setCityInputValue(profile.mesto ?? "");
+                    setCityValidated(true);
+                  }}
                   className="px-4 py-2 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-700"
                   disabled={saving}
                 >
@@ -866,8 +1038,12 @@ export default function Profile() {
                 </button>
                 <button
                   onClick={handleSave}
-                  className="px-5 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-                  disabled={saving}
+                  className={`px-5 py-2 rounded-lg text-white ${
+                    cityValidated && form.mesto
+                      ? "bg-blue-600 hover:bg-blue-700"
+                      : "bg-gray-400 cursor-not-allowed"
+                  }`}
+                  disabled={saving || !cityValidated || !form.mesto}
                 >
                   {saving ? "Ukladám…" : "Uložiť"}
                 </button>
