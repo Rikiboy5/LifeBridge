@@ -51,6 +51,14 @@ const categoryImageMap: Record<string, string> = {
 };
 
 const categoryOptions = ["Dobrovoľníctvo", "Vzdelávanie", "Pomoc seniorom", "Spoločenská aktivita", "Iné"];
+const ROLE_LABELS: Record<string, string> = {
+  user_dobrovolnik: "Dobrovoľník",
+  user_firma: "Firma",
+  user_senior: "Dôchodca",
+  admin: "Admin",
+};
+
+const roleLabel = (role?: string | null) => ROLE_LABELS[role ?? ""] || "Používateľ";
 
 const normalizeCategory = (value: string) =>
   value
@@ -419,9 +427,14 @@ export default function PostDetail() {
                   <p className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
                     {post.name} {post.surname}
                   </p>
-                  <p className="text-sm text-gray-600 dark:text-gray-300 truncate">
-                    {profile?.rola || "Pouzivatel"} • {profile?.mesto || "nezadane mesto"}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600 dark:text-gray-300">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-200 text-xs font-semibold">
+                      {roleLabel(profile?.rola)}
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {profile?.mesto || "nezadane mesto"}
+                    </span>
+                  </div>
                 </div>
               </div>
             </button>
