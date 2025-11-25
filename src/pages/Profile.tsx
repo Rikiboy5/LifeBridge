@@ -704,6 +704,7 @@ export default function Profile() {
             currentUserId={currentUserId}
             baseUrl={baseUrl}
             showRateButton={false}
+            pageSize={5}
             className="mt-10"
           />
         </div>

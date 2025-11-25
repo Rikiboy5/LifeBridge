@@ -299,6 +299,7 @@ export default function PublicProfile() {
             userId={userId ?? undefined}
             currentUserId={currentUserId}
             baseUrl={baseUrl}
+            pageSize={5}
             className="mt-10"
           />
         </div>

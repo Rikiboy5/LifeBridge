@@ -704,9 +704,9 @@ def get_user_ratings(user_id):
 
     limit_arg = request.args.get("limit")
     try:
-        default_page_size = int(limit_arg) if limit_arg is not None else 10
+        default_page_size = int(limit_arg) if limit_arg is not None else 5
     except (TypeError, ValueError):
-        default_page_size = 10
+        default_page_size = 5
 
     try:
         page_size = int(request.args.get("page_size", default_page_size))
