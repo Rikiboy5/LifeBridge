@@ -403,57 +403,56 @@ export default function PostDetail() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-6">
-          <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-3">
-            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Autor</p>
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-3">
+          <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Autor</p>
 
-            <button
-              type="button"
-              onClick={() => navigate(`/user/${post.user_id}`)}
-              className="w-full text-left rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/80 p-2 transition"
-            >
-              <div className="flex gap-4 items-start">
-                <div className="w-14 h-14 rounded-full overflow-hidden ring-2 ring-indigo-100 dark:ring-indigo-900 bg-gray-100 dark:bg-gray-700 flex-shrink-0">
-                  {avatarUrl ? (
-                    <img src={avatarUrl} alt={`${post.name} ${post.surname}`} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-semibold">
-                      {(post.name?.[0] || "") + (post.surname?.[0] || "") || "?"}
-                    </div>
-                  )}
-                </div>
-
-                <div className="min-w-0 flex-1 space-y-1">
-                  <p className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
-                    {post.name} {post.surname}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600 dark:text-gray-300">
-                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-200 text-xs font-semibold">
-                      {roleLabel(profile?.rola)}
-                    </span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                      {profile?.mesto || "nezadane mesto"}
-                    </span>
+          <button
+            type="button"
+            onClick={() => navigate(`/user/${post.user_id}`)}
+            className="w-full text-left rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/80 p-2 transition"
+          >
+            <div className="flex gap-4 items-start">
+              <div className="w-14 h-14 rounded-full overflow-hidden ring-2 ring-indigo-100 dark:ring-indigo-900 bg-gray-100 dark:bg-gray-700 flex-shrink-0">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt={`${post.name} ${post.surname}`} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-semibold">
+                    {(post.name?.[0] || "") + (post.surname?.[0] || "") || "?"}
                   </div>
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
+                  {post.name} {post.surname}
+                </p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600 dark:text-gray-300">
+                  <span className="inline-flex items-center px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-200 text-xs font-semibold">
+                    {roleLabel(profile?.rola)}
+                  </span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {profile?.mesto || "nezadane mesto"}
+                  </span>
                 </div>
               </div>
-            </button>
+            </div>
+          </button>
 
-            {profile?.about && (
-              <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed mt-1 whitespace-pre-line break-words">
-                {profile.about}
-              </p>
-            )}
-            {profileError && <p className="text-sm text-red-500">{profileError}</p>}
-          </div>
-
-          <UserRatingsSection
-            userId={post.user_id}
-            currentUserId={currentUserId}
-            baseUrl={API_BASE}
-            className="mt-0"
-          />
+          {profile?.about && (
+            <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed mt-1 whitespace-pre-line break-words">
+              {profile.about}
+            </p>
+          )}
+          {profileError && <p className="text-sm text-red-500">{profileError}</p>}
         </div>
+
+        <UserRatingsSection
+          userId={post.user_id}
+          currentUserId={currentUserId}
+          baseUrl={API_BASE}
+          className="mt-0"
+          pageSize={5}
+        />
       </div>
     </MainLayout>
   );
