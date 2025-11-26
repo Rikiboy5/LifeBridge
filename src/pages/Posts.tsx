@@ -68,6 +68,16 @@ const CATEGORY_FILTER_OPTIONS = [
   { value: "ine", label: "Ine" },
 ];
 
+// Map UI slug values to DB/display category names
+const CATEGORY_VALUE_TO_DB: Record<string, string | string[]> = {
+  dobrovolnictvo: "Dobrovolnictvo",
+  vzdelavanie: "Vzdelavanie",
+  pomoc_seniorom: "Pomoc seniorom",
+  // include variant with diacritics to match DB values
+  spolocenska_aktivita: ["Spolocenska aktivita", "Spoločenská aktivita"],
+  ine: ["Ine", "Iné"],
+};
+
 const SORT_OPTIONS = [
   { value: "id_desc", label: "Najnovsie" },
   { value: "id_asc", label: "Najstarsie" },
@@ -124,9 +134,21 @@ export default function Posts() {
     });
     if (usingSearch) qs.set("q", term);
     if (roleFilter !== "all") qs.set("role", roleFilter);
-    if (categoryFilter !== "all") {
-      qs.set("category", categoryFilter);
-      qs.set("type", categoryFilter);
+    const categoryValuesRaw = CATEGORY_VALUE_TO_DB[categoryFilter];
+    const categoryValues = Array.isArray(categoryValuesRaw)
+      ? categoryValuesRaw
+      : categoryFilter === "all"
+      ? []
+      : [categoryValuesRaw || categoryFilter];
+
+    const normalizedCategories = categoryValues
+      .map((c) => c.replace(/_/g, " ").trim())
+      .filter(Boolean);
+
+    if (normalizedCategories.length > 0) {
+      const csv = normalizedCategories.join(",");
+      qs.set("category", csv);
+      qs.set("type", csv);
     }
 
     try {
