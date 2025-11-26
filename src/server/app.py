@@ -186,8 +186,27 @@ def find_best_matches_for_user(
             finally:
                 cur.close()
 
-        params = [user_id]
-        where = ["u.id_user != %s", "u.soft_del = 0"]
+        # Ensure we only consider users from the same city as the current user.
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT mesto FROM users WHERE id_user = %s AND soft_del = 0",
+                (user_id,),
+            )
+            city_row = cur.fetchone()
+        finally:
+            cur.close()
+
+        if not city_row:
+            return []
+
+        current_city = city_row[0]
+        if not current_city:
+            # No city info -> do not recommend cross-city users.
+            return []
+
+        params = [user_id, current_city]
+        where = ["u.id_user != %s", "u.soft_del = 0", "u.mesto = %s"]
         if target_role:
             where.append("u.rola = %s")
             params.append(target_role)
@@ -223,6 +242,7 @@ def find_best_matches_for_user(
                 }
             )
 
+        # Rank same-city candidates by hobby/interest similarity (cosine distance).
         results.sort(key=lambda x: x["similarity"], reverse=True)
         return results[:top_n]
 

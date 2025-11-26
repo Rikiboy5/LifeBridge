@@ -29,6 +29,16 @@ interface TopUser {
   rating_count?: number | null;
 }
 
+interface MatchedUser {
+  id_user: number;
+  meno?: string | null;
+  priezvisko?: string | null;
+  mail?: string | null;
+  rola?: string | null;
+  similarity?: number | null;
+  similarity_percent?: number | null;
+}
+
 export default function Home() {
   const offers = [
     {
@@ -91,6 +101,10 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [topUsers, setTopUsers] = useState<TopUser[]>([]);
   const [topError, setTopError] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [matchedUsers, setMatchedUsers] = useState<MatchedUser[]>([]);
+  const [matchError, setMatchError] = useState<string | null>(null);
+  const [matchLoading, setMatchLoading] = useState(false);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -111,6 +125,56 @@ export default function Home() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("user");
+      if (!raw) {
+        setCurrentUserId(null);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      const id = parsed?.id ?? parsed?.id_user ?? null;
+      setCurrentUserId(typeof id === "number" ? id : null);
+    } catch {
+      setCurrentUserId(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setMatchLoading(true);
+        setMatchError(null);
+        const params = new URLSearchParams({ top_n: "3" });
+        const res = await fetch(`/api/match/${currentUserId}?${params.toString()}`);
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || "Nepodarilo sa nacitat odporucania.");
+        }
+        const data: MatchedUser[] = await res.json();
+        if (!cancelled) {
+          setMatchedUsers(Array.isArray(data) ? data.slice(0, 3) : []);
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setMatchError(e.message || "Nepodarilo sa nacitat odporucanych.");
+          setMatchedUsers([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setMatchLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId]);
 
   useEffect(() => {
     (async () => {
@@ -227,6 +291,72 @@ export default function Home() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+        </section>
+
+        <section className="bg-white dark:bg-gray-900 rounded-2xl shadow-md p-6">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-semibold">Top zhody pre teba</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Ukazujeme profily s najvyssou zhodou z tvojho mesta.
+              </p>
+            </div>
+            {currentUserId && (
+              <Link
+                to={`/users?matchFor=${currentUserId}`}
+                className="inline-flex items-center gap-2 rounded-full bg-blue-600 text-white px-4 py-2 text-sm font-semibold hover:bg-blue-700 transition"
+              >
+                Zobrazit dalsich
+                <span aria-hidden="true">→</span>
+              </Link>
+            )}
+          </div>
+
+          {!currentUserId ? (
+            <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">
+              Prihlas sa, aby sme ti vedeli odporucit ludi s podobnymi zaujmami.
+            </p>
+          ) : matchLoading ? (
+            <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">
+              Hladame ti najlepsie zhody...
+            </p>
+          ) : matchError ? (
+            <p className="mt-4 text-sm text-red-500">{matchError}</p>
+          ) : matchedUsers.length === 0 ? (
+            <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">
+              Zatial nemame ziadne odporucania v tvojom meste.
+            </p>
+          ) : (
+            <div className="mt-6 grid gap-4 md:grid-cols-3">
+              {matchedUsers.map((user) => (
+                <div
+                  key={user.id_user}
+                  className="rounded-2xl border border-gray-100 dark:border-gray-800 p-4 bg-gray-50 dark:bg-gray-800/60 hover:shadow-md transition"
+                >
+                  <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                    {(user.meno ?? "") + " " + (user.priezvisko ?? "")}
+                  </div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    {user.mail || "Bez e-mailu"}
+                  </div>
+                  {typeof user.similarity_percent === "number" && (
+                    <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200 px-3 py-1 text-xs font-semibold">
+                      Zhoda zaujmov {user.similarity_percent}%
+                    </div>
+                  )}
+                  <Link
+                    to={`/user/${user.id_user}`}
+                    className="mt-4 inline-flex items-center text-sm text-blue-600 hover:underline"
+                  >
+                    Zobrazit profil
+                    <span className="ml-1" aria-hidden="true">
+                      →
+                    </span>
+                  </Link>
+                </div>
+              ))}
             </div>
           )}
         </section>
