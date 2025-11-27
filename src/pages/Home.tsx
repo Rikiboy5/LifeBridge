@@ -55,6 +55,7 @@ export default function Home() {
   const [matchedUsers, setMatchedUsers] = useState<MatchedUser[]>([]);
   const [matchError, setMatchError] = useState<string | null>(null);
   const [matchLoading, setMatchLoading] = useState(false);
+  const [distanceKm, setDistanceKm] = useState<string>("");
   const [articles, setArticles] = useState<ArticleType[]>([]);
   const [articlesError, setArticlesError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -121,6 +122,9 @@ export default function Home() {
         setMatchLoading(true);
         setMatchError(null);
         const params = new URLSearchParams({ top_n: "3" });
+        if (distanceKm) {
+          params.set("distance_km", distanceKm);
+        }
         const res = await fetch(`/api/match/${currentUserId}?${params.toString()}`);
         if (!res.ok) {
           const text = await res.text();
@@ -145,7 +149,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [currentUserId]);
+  }, [currentUserId, distanceKm]);
 
   // ---- LOAD TOP USERS ----
   useEffect(() => {
@@ -259,22 +263,40 @@ export default function Home() {
         </section>
 
         <section className="bg-white dark:bg-gray-900 rounded-2xl shadow-md p-6">
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-            <div>
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="space-y-1">
               <h2 className="text-2xl font-semibold">Top zhody pre teba</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                Ukazujeme profily s najvyssou zhodou z tvojho mesta.
+                Najprv vyfiltrujeme podľa vzdialenosti, potom podľa zhody záľub.
               </p>
             </div>
-            {currentUserId && (
-              <Link
-                to={`/users?matchFor=${currentUserId}`}
-                className="inline-flex items-center gap-2 rounded-full bg-blue-600 text-white px-4 py-2 text-sm font-semibold hover:bg-blue-700 transition"
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <label className="text-sm text-gray-600 dark:text-gray-300">
+                Vzdialenosť:
+              </label>
+              <select
+                value={distanceKm}
+                onChange={(e) => setDistanceKm(e.target.value)}
+                className="border rounded-xl px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:border-gray-700"
               >
-                Zobrazit dalsich
-                <span aria-hidden="true">→</span>
-              </Link>
-            )}
+                <option value="">0 km</option>
+                <option value="10">do 10 km</option>
+                <option value="25">do 25 km</option>
+                <option value="50">do 50 km</option>
+                <option value="100">do 100 km</option>
+              </select>
+              {currentUserId && (
+                <Link
+                  to={`/users?matchFor=${currentUserId}${
+                    distanceKm ? `&distance_km=${encodeURIComponent(distanceKm)}` : ""
+                  }`}
+                  className="inline-flex items-center gap-2 rounded-full bg-blue-600 text-white px-4 py-2 text-sm font-semibold hover:bg-blue-700 transition"
+                >
+                  Zobraziť ďalších
+                  <span aria-hidden="true">→</span>
+                </Link>
+              )}
+            </div>
           </div>
 
           {!currentUserId ? (
