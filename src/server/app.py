@@ -186,8 +186,27 @@ def find_best_matches_for_user(
             finally:
                 cur.close()
 
-        params = [user_id]
-        where = ["u.id_user != %s", "u.soft_del = 0"]
+        # Ensure we only consider users from the same city as the current user.
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT mesto FROM users WHERE id_user = %s AND soft_del = 0",
+                (user_id,),
+            )
+            city_row = cur.fetchone()
+        finally:
+            cur.close()
+
+        if not city_row:
+            return []
+
+        current_city = city_row[0]
+        if not current_city:
+            # No city info -> do not recommend cross-city users.
+            return []
+
+        params = [user_id, current_city]
+        where = ["u.id_user != %s", "u.soft_del = 0", "u.mesto = %s"]
         if target_role:
             where.append("u.rola = %s")
             params.append(target_role)
@@ -223,6 +242,7 @@ def find_best_matches_for_user(
                 }
             )
 
+        # Rank same-city candidates by hobby/interest similarity (cosine distance).
         results.sort(key=lambda x: x["similarity"], reverse=True)
         return results[:top_n]
 
@@ -984,7 +1004,6 @@ def list_conversations():
                   '|||', -1
               ) AS last_message,
               GROUP_CONCAT(DISTINCT cp.id_user) AS participant_ids,
-
               -- "ten druhý" používateľ v 1:1 chate
               MAX(CASE WHEN cp.id_user <> %s THEN cp.id_user END) AS other_user_id,
               MAX(
@@ -993,7 +1012,6 @@ def list_conversations():
                   ELSE NULL
                 END
               ) AS other_user_name,
-
               -- počet neprečítaných správ pre aktuálneho používateľa
               (
                 SELECT COUNT(*)
@@ -1002,7 +1020,6 @@ def list_conversations():
                   AND (cp_me.last_read_message_id IS NULL OR m2.id_message > cp_me.last_read_message_id)
                   AND m2.sender_id <> %s
               ) AS unread_count
-
             FROM conversations c
             -- riadok pre aktuálneho používateľa v conversation_participants
             JOIN conversation_participants cp_me
@@ -1717,6 +1734,71 @@ def list_activities():
         conn.close()
 
 
+import requests
+import logging
+GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
+
+import requests
+import logging
+
+GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
+
+def geocode_address(address: str):
+    params = {
+        "q": address,
+        "format": "json",
+        "limit": 1,
+        "addressdetails": 1,
+    }
+    headers = {
+        "User-Agent": "LifeBridgeApp/1.0 (contact@lifebridge.sk)"
+    }
+
+    try:
+        resp = requests.get(GEOCODE_URL, params=params, headers=headers, timeout=10)
+    except requests.RequestException as e:
+        logging.exception(f"Geocode request failed: {e}")
+        raise ValueError("Nepodarilo sa kontaktovať geokódovaciu službu.")
+
+    if resp.status_code != 200:
+        logging.warning(f"Nominatim HTTP {resp.status_code}: {resp.text[:200]}")
+        raise ValueError("Geokódovanie zlyhalo (chyba služby).")
+
+    try:
+        data = resp.json()
+    except ValueError:
+        logging.warning(f"Nominatim vrátil neplatný JSON: {resp.text[:200]}")
+        raise ValueError("Geokódovanie vrátilo neplatnú odpoveď.")
+
+    if not isinstance(data, list) or len(data) == 0:
+        logging.info(f"Nominatim nenašiel výsledky pre adresu: {address}")
+        raise ValueError("Pre zadanú adresu sa nenašli žiadne súradnice.")
+
+    first = data[0]
+    logging.info(f"Nominatim response for '{address}': {first}")  # DEBUG log
+    
+    lat_str = first.get("lat")
+    lon_str = first.get("lon")
+    
+    if not lat_str or not lon_str:
+        logging.warning(f"Missing lat/lon in response: {first}")
+        raise ValueError("Geokódovanie vrátilo neúplné súradnice.")
+    
+    try:
+        lat = float(lat_str)
+        lng = float(lon_str)
+    except (ValueError, TypeError) as e:
+        logging.warning(f"Chyba pri parsovaní súradníc lat={lat_str}, lon={lon_str}: {e}")
+        raise ValueError("Geokódovanie vrátilo neplatné súradnice.")
+    
+    # Extra validácia rozsahu
+    if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+        logging.warning(f"Súradnice mimo rozsahu: lat={lat}, lon={lng}")
+        raise ValueError("Geokódovanie vrátilo súradnice mimo platného rozsahu.")
+
+    return lat, lng
+
+
 @app.post("/api/activities")
 def create_activity():
     data = request.get_json()
@@ -1724,18 +1806,28 @@ def create_activity():
     description = data.get("description")
     image_url = data.get("image_url")
     capacity = data.get("capacity")
-    lat = data.get("lat")
-    lng = data.get("lng")
     user_id = data.get("user_id")
+    address = data.get("address")  # nový vstup z frontendu
 
     if not title or len(title.strip()) == 0:
         return jsonify({"error": "Názov je povinný."}), 400
     if not isinstance(capacity, int) or capacity < 1:
         return jsonify({"error": "Neplatná kapacita."}), 400
-    if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
-        return jsonify({"error": "Neplatné súradnice."}), 400
     if not user_id:
         return jsonify({"error": "Nepodarilo sa identifikovať používateľa."}), 400
+    if not address or len(address.strip()) == 0:
+        return jsonify({"error": "Adresa je povinná."}), 400
+
+    try:
+        lat, lng = geocode_address(address)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        return jsonify({"error": "Nepodarilo sa získať súradnice z adresy."}), 502
+
+    # validácia výsledných súradníc (pre istotu)
+    if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+        return jsonify({"error": "Geokódovanie vrátilo neplatné súradnice."}), 400
 
     conn = get_conn()
     try:
@@ -1750,9 +1842,10 @@ def create_activity():
         row = cur.fetchone()
         keys = [desc[0] for desc in cur.description]
         activity = dict(zip(keys, row))
-        return jsonify(activity)
+        return jsonify(activity), 201
     finally:
         conn.close()
+
 
 
 @app.post("/api/activities/<int:activity_id>/signup")
@@ -1805,6 +1898,57 @@ def cancel_signup(activity_id):
         cur.execute("UPDATE activities SET attendees_count = GREATEST(attendees_count - 1, 0) WHERE id_activity = %s", (activity_id,))
         conn.commit()
         return jsonify({"message": "Úspešne odhlásený"})
+    finally:
+        conn.close()
+
+# ==========================================
+# ARTICLES
+# ==========================================     
+
+@app.get("/api/articles")
+def list_articles():
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM articles ORDER BY created_at DESC")
+        return jsonify(cur.fetchall())
+    finally:
+        conn.close()
+
+@app.get("/api/articles/<int:id_article>")
+def get_article(id_article):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM articles WHERE id_article = %s", (id_article,))
+        article = cur.fetchone()
+        if not article:
+            return jsonify({"error": "Article not found"}), 404
+        return jsonify(article)
+    finally:
+        conn.close()
+
+@app.post("/api/articles")
+def create_article():
+    data = request.get_json()
+    title = data.get("title")
+    text = data.get("text")
+    image_url = data.get("image_url")
+
+    if not title or not text:
+        return jsonify({"error": "Title and text are required"}), 400
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO articles (title, text, image_url)
+            VALUES (%s, %s, %s)
+        """, (title, text, image_url))
+        conn.commit()
+
+        new_id = cur.lastrowid
+        return jsonify({"id_article": new_id}), 201
     finally:
         conn.close()
 

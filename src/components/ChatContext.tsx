@@ -221,6 +221,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, [isOpen, activeConversationId]);
 
+  // zvuk pri nových správach
+  useEffect(() => {
+    // načítame zvukový súbor, keď sa provider namountuje
+    const audio = new Audio("/public/new_msg.mp3");
+    notificationAudioRef.current = audio;
+  }, []);
+
     // Globálny refresh inboxu každých 30 sekúnd (aj keď je widget zatvorený)
   useEffect(() => {
     refreshConversations();
@@ -231,14 +238,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // dependency array nechávame prázdnu – nech sa interval nastaví len raz
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-    // zvuk pri nových správach
-    useEffect(() => {
-    // načítame zvukový súbor, keď sa provider namountuje
-    const audio = new Audio("/public/new_msg.mp3");
-    notificationAudioRef.current = audio;
-  }, []);
-
 
   const value: ChatContextValue = {
     conversations,

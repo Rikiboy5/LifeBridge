@@ -259,7 +259,7 @@ export default function PublicProfile() {
           <div className="bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-8 flex flex-col items-center text-center space-y-4">
             <AvatarCircle />
             <h2 className="text-2xl font-bold">{fullName}</h2>
-            {canStartChat && (
+              {canStartChat && (
               <button
                 type="button"
                 onClick={() => openConversationWithUser(userId!)}

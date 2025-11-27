@@ -32,7 +32,7 @@ export default function Login() {
       // uložíme prihláseného používateľa
       localStorage.setItem("user", JSON.stringify(data.user));
 
-      // hneď po prihlásení, ale s 2s delay, refreshni inbox pre chat
+      // 2s (delay) po prihlásení, refreshne inbox pre chat
       setTimeout(() => {
         refreshConversations();
       }, 2000);
