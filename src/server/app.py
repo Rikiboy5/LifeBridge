@@ -915,6 +915,238 @@ def upsert_user_rating(user_id):
         conn.close()
 
 # ==========================================
+# 💬 CHAT – CONVERSATIONS & MESSAGES
+# ==========================================
+
+@app.post("/api/chat/conversations")
+def create_or_get_conversation():
+    data = request.get_json(force=True) or {}
+    user_ids = data.get("user_ids")
+
+    if not isinstance(user_ids, list) or len(user_ids) < 2:
+        return jsonify({"error": "Potrebujem aspoň dvoch účastníkov."}), 400
+
+    # odstránime duplicity + zoradíme, nech je to deterministické
+    user_ids = sorted({int(uid) for uid in user_ids})
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        # nájsť konverzáciu, ktorá má presne týchto účastníkov a nikoho navyše
+        placeholders = ", ".join(["%s"] * len(user_ids))
+        query = f"""
+            SELECT c.id_conversation
+            FROM conversations c
+            JOIN conversation_participants cp ON cp.id_conversation = c.id_conversation
+            WHERE cp.id_user IN ({placeholders})
+            GROUP BY c.id_conversation
+            HAVING COUNT(*) = %s
+        """
+        cur.execute(query, (*user_ids, len(user_ids)))
+        row = cur.fetchone()
+
+        if row:
+            return jsonify({"id_conversation": row["id_conversation"], "created": False}), 200
+
+        # neexistuje - vytvoríme novú
+        cur.execute("INSERT INTO conversations () VALUES ()")
+        conv_id = cur.lastrowid
+
+        cur.executemany(
+            "INSERT INTO conversation_participants (id_conversation, id_user) VALUES (%s, %s)",
+            [(conv_id, uid) for uid in user_ids],
+        )
+        conn.commit()
+
+        return jsonify({"id_conversation": conv_id, "created": True}), 201
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/chat/conversations")
+def list_conversations():
+    user_id = request.args.get("user_id", type=int)
+    if not user_id:
+        return jsonify({"error": "Chýba user_id."}), 400
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT
+              c.id_conversation,
+              MAX(m.created_at) AS last_message_at,
+              SUBSTRING_INDEX(
+                  MAX(CONCAT(m.created_at, '|||', m.content)),
+                  '|||', -1
+              ) AS last_message,
+              GROUP_CONCAT(DISTINCT cp.id_user) AS participant_ids,
+
+              -- "ten druhý" používateľ v 1:1 chate
+              MAX(CASE WHEN cp.id_user <> %s THEN cp.id_user END) AS other_user_id,
+              MAX(
+                CASE
+                  WHEN cp.id_user <> %s THEN CONCAT(u.meno, ' ', u.priezvisko)
+                  ELSE NULL
+                END
+              ) AS other_user_name,
+
+              -- počet neprečítaných správ pre aktuálneho používateľa
+              (
+                SELECT COUNT(*)
+                FROM messages m2
+                WHERE m2.id_conversation = c.id_conversation
+                  AND (cp_me.last_read_message_id IS NULL OR m2.id_message > cp_me.last_read_message_id)
+                  AND m2.sender_id <> %s
+              ) AS unread_count
+
+            FROM conversations c
+            -- riadok pre aktuálneho používateľa v conversation_participants
+            JOIN conversation_participants cp_me
+              ON cp_me.id_conversation = c.id_conversation
+             AND cp_me.id_user = %s
+            -- všetci účastníci (pre meno, participant_ids)
+            JOIN conversation_participants cp
+              ON cp.id_conversation = c.id_conversation
+            JOIN users u
+              ON u.id_user = cp.id_user
+            LEFT JOIN messages m
+              ON m.id_conversation = c.id_conversation
+            GROUP BY c.id_conversation
+            ORDER BY last_message_at DESC
+            """,
+            (user_id, user_id, user_id, user_id),
+        )
+
+        rows = cur.fetchall()
+        return jsonify(rows), 200
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/chat/conversations/<int:conv_id>/messages")
+def get_messages(conv_id):
+    page = request.args.get("page", default=1, type=int)
+    page_size = request.args.get("page_size", default=50, type=int)
+    offset = (page - 1) * page_size
+    user_id = request.args.get("user_id", type=int)
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        # načítaj správy
+        cur.execute(
+            """
+            SELECT
+              m.id_message,
+              m.sender_id,
+              m.content,
+              m.created_at,
+              u.meno,
+              u.priezvisko
+            FROM messages m
+            JOIN users u ON u.id_user = m.sender_id
+            WHERE m.id_conversation = %s
+            ORDER BY m.created_at ASC
+            LIMIT %s OFFSET %s
+            """,
+            (conv_id, page_size, offset),
+        )
+        rows = cur.fetchall()
+
+        # ak vieme, kto je aktuálny používateľ, označ všetky doteraz načítané správy ako prečítané
+        if user_id is not None and rows:
+            max_id = max(row["id_message"] for row in rows)
+            cur.execute(
+                """
+                UPDATE conversation_participants
+                SET last_read_message_id = %s,
+                    last_read_at = NOW()
+                WHERE id_conversation = %s
+                  AND id_user = %s
+                """,
+                (max_id, conv_id, user_id),
+            )
+            conn.commit()
+
+        return jsonify(rows), 200
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.post("/api/chat/conversations/<int:conv_id>/messages")
+def send_message(conv_id):
+    data = request.get_json(force=True) or {}
+    sender_id = data.get("sender_id")
+    content = (data.get("content") or "").strip()
+
+    if not sender_id or not content:
+        return jsonify({"error": "Chýba odosielateľ alebo obsah."}), 400
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO messages (id_conversation, sender_id, content) VALUES (%s, %s, %s)",
+            (conv_id, sender_id, content),
+        )
+        conn.commit()
+        msg_id = cur.lastrowid
+
+        return jsonify({"id_message": msg_id}), 201
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.patch("/api/chat/messages/<int:message_id>")
+def edit_message(message_id):
+    data = request.get_json(force=True) or {}
+    sender_id = data.get("sender_id")
+    new_content = (data.get("content") or "").strip()
+
+    if not sender_id or not new_content:
+        return jsonify({"error": "Chýba odosielateľ alebo obsah."}), 400
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        # skontroluj, že správa existuje a patrí tomuto používateľovi
+        cur.execute(
+            "SELECT id_message, sender_id FROM messages WHERE id_message = %s",
+            (message_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Správa neexistuje."}), 404
+        if int(row["sender_id"]) != int(sender_id):
+            return jsonify({"error": "Nemôžeš upraviť cudziu správu."}), 403
+
+        cur.execute(
+            """
+            UPDATE messages
+            SET content = %s,
+                is_edited = 1,
+                edited_at = NOW()
+            WHERE id_message = %s
+            """,
+            (new_content, message_id),
+        )
+        conn.commit()
+        return jsonify({"success": True}), 200
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ==========================================
 # 📝 PRÍSPEVKY
 # ==========================================
 

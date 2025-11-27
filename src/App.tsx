@@ -10,6 +10,7 @@ import Blog from "./pages/Blog";
 import ActivityDetail from "./pages/ActivityDetail";
 import CreateActivity from "./pages/CreateActivity";
 import PublicProfile from "./pages/PublicProfile";
+import { ChatProvider } from "./components/ChatContext";
 
 // pomocná funkcia – zistí, či je prihlásený admin
 function isCurrentUserAdmin(): boolean {
@@ -29,26 +30,28 @@ export default function App() {
 
   return (
     <Router>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/profil" element={<Profile />} />
-        <Route path="/users" element={<Users />} />
+      <ChatProvider>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/profil" element={<Profile />} />
+          <Route path="/users" element={<Users />} />
 
-        {/* 👇 ak je admin → plný Profile, inak PublicProfile */}
-        <Route
-          path="/user/:id"
-          element={isAdmin ? <Profile /> : <PublicProfile />}
-        />
+          {/* 👇 ak je admin → plný Profile, inak PublicProfile */}
+          <Route
+            path="/user/:id"
+            element={isAdmin ? <Profile /> : <PublicProfile />}
+          />
 
-        <Route path="/register" element={<Register />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/posts" element={<Posts />} />
-        <Route path="/posts/:id" element={<PostDetail />} />
-        <Route path="/blog" element={<Blog />} />
-        <Route path="/activities" element={<Blog />} />
-        <Route path="/activities/create" element={<CreateActivity />} />
-        <Route path="/activities/:id" element={<ActivityDetail />} />
-      </Routes>
+          <Route path="/register" element={<Register />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/posts" element={<Posts />} />
+          <Route path="/posts/:id" element={<PostDetail />} />
+          <Route path="/blog" element={<Blog />} />
+          <Route path="/activities" element={<Blog />} />
+          <Route path="/activities/create" element={<CreateActivity />} />
+          <Route path="/activities/:id" element={<ActivityDetail />} />
+        </Routes>
+      </ChatProvider>
     </Router>
   );
 }

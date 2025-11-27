@@ -5,8 +5,9 @@ import Footer from "../components/Footer";
 import ChatbotWidget from "../components/Chatbot_voice2_merged_v9_SK";
 interface MainLayoutProps {
   children: React.ReactNode;
-
 }
+
+import ChatWidget from "../components/ChatWidget";
 
 export default function MainLayout({ children }: MainLayoutProps) {
   return (
@@ -23,8 +24,11 @@ export default function MainLayout({ children }: MainLayoutProps) {
 
       {/* Footer na spodku */}
       <Footer />
+      <div className="fixed bottom-20 right-4 z-[99999]">
+        <ChatWidget />
+      </div>
       <div className="fixed bottom-4 right-4 z-[99999]">
-            <ChatbotWidget />
+        <ChatbotWidget />
       </div>
       
     </div>

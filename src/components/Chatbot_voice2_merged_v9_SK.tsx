@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Send, MessageCircle, X, ChevronDown, Volume2, VolumeX } from "lucide-react";
+import { Send, Bot, X, ChevronDown, Volume2, VolumeX } from "lucide-react";
 
 /**
  * LifeBridge – Chatbot v9 (SK-only)
@@ -714,7 +714,7 @@ export default function ChatbotWidgetSKv9() {
           aria-label="Otvoriť chat"
           className="rounded-full shadow-lg p-4 bg-blue-600 text-white hover:bg-blue-700"
         >
-          <MessageCircle className="w-6 h-6" />
+          <Bot className="w-6 h-6" />
         </button>
       )}
 
