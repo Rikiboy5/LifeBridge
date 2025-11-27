@@ -67,6 +67,7 @@ export default function Users() {
   const [roleFilter, setRoleFilter] = useState("all");
   const [sortOption, setSortOption] = useState("id_desc");
   const [avatars, setAvatars] = useState<Record<number, string | null>>({});
+  const [distanceKm, setDistanceKm] = useState("");
 
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
 
@@ -83,6 +84,15 @@ export default function Users() {
     if (!raw) return null;
     const parsed = Number(raw);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, [location.search]);
+
+  // voliteľná vzdialenosť pre match (?distance_km=XX)
+  const matchDistance = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const raw = params.get("distance_km");
+    if (!raw) return "";
+    const num = Number(raw);
+    return Number.isFinite(num) && num > 0 ? String(raw) : "";
   }, [location.search]);
 
   const isMatchMode = matchUserId !== null;
@@ -108,6 +118,10 @@ export default function Users() {
     }
   }, [isMatchMode]);
 
+  useEffect(() => {
+    setDistanceKm(matchDistance);
+  }, [matchDistance]);
+
   // základné načítanie zoznamu / match zoznamu
   useEffect(() => {
     let cancelled = false;
@@ -127,6 +141,7 @@ export default function Users() {
           const params = new URLSearchParams({
             top_n: "50",
           });
+          if (distanceKm) params.set("distance_km", distanceKm);
           endpoint = `/api/match/${matchUserId}?${params.toString()}`;
         } else {
           const params = new URLSearchParams({
@@ -171,7 +186,7 @@ export default function Users() {
     return () => {
       cancelled = true;
     };
-  }, [isMatchMode, matchUserId, roleFilter, sortOption]);
+  }, [isMatchMode, matchUserId, roleFilter, sortOption, distanceKm]);
 
   // server-side vyhľadávanie (sentence embeddings) – iba mimo match módu
   useEffect(() => {
@@ -381,6 +396,28 @@ export default function Users() {
           </p>
         </div>
       </div>
+      {isMatchMode && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <label className="text-sm text-gray-600 dark:text-gray-300">
+            Vzdialenosť:
+          </label>
+          <select
+            value={distanceKm}
+            onChange={(e) => setDistanceKm(e.target.value)}
+            className="border rounded-xl px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:border-gray-700"
+            aria-label="Filter vzdialenosti"
+          >
+            <option value="">0 km</option>
+            <option value="10">do 10 km</option>
+            <option value="25">do 25 km</option>
+            <option value="50">do 50 km</option>
+            <option value="100">do 100 km</option>
+          </select>
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            Najprv filtrujeme podľa vzdialenosti, potom podľa zhody záľub.
+          </span>
+        </div>
+      )}
 
       {!isMatchMode && (
         <div className="mt-4 space-y-3">

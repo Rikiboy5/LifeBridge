@@ -10,11 +10,11 @@ from werkzeug.utils import secure_filename
 from contextlib import contextmanager
 import logging
 import json
+from math import radians, sin, cos, sqrt, atan2
 import numpy as np
 from sentence_transformers import SentenceTransformer
 EMBEDDING_MODEL_NAME = "intfloat/multilingual-e5-base"
 model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -156,9 +156,51 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
         return 0.0
     return float(np.dot(a, b) / denom)
 
+# Simple in-memory cache so we do not geocode the same city repeatedly.
+CITY_COORD_CACHE: dict[str, tuple[float, float]] = {}
+
+
+def get_city_coordinates(city_name: str) -> tuple[float, float] | None:
+    """
+    Reuses the existing geocode_address helper to fetch coordinates for a city.
+    The cache keeps repeated calls cheap within the same process.
+    """
+    if not city_name:
+        return None
+    key = city_name.strip().lower()
+    if not key:
+        return None
+    if key in CITY_COORD_CACHE:
+        return CITY_COORD_CACHE[key]
+
+    try:
+        lat, lng = geocode_address(city_name)
+    except Exception as exc:
+        logging.warning("Failed to geocode city '%s': %s", city_name, exc)
+        return None
+
+    CITY_COORD_CACHE[key] = (lat, lng)
+    return lat, lng
+
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Compute distance between two lat/lon pairs in kilometers."""
+    R = 6371.0
+    d_lat = radians(lat2 - lat1)
+    d_lon = radians(lon2 - lon1)
+    a = (
+        sin(d_lat / 2) ** 2
+        + cos(radians(lat1)) * cos(radians(lat2)) * sin(d_lon / 2) ** 2
+    )
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return R * c
+
 
 def find_best_matches_for_user(
-    user_id: int, top_n: int = 5, target_role: str | None = None
+    user_id: int,
+    top_n: int = 5,
+    target_role: str | None = None,
+    distance_km: float | None = None,
 ):
     with db_conn() as conn:
         emb = get_user_embedding_vector(conn, user_id)
@@ -205,8 +247,20 @@ def find_best_matches_for_user(
             # No city info -> do not recommend cross-city users.
             return []
 
-        params = [user_id, current_city]
-        where = ["u.id_user != %s", "u.soft_del = 0", "u.mesto = %s"]
+        current_coords = None
+        if distance_km is not None:
+            current_coords = get_city_coordinates(current_city)
+            if not current_coords:
+                # Without coordinates we cannot apply distance filter.
+                return []
+
+        params = [user_id]
+        where = ["u.id_user != %s", "u.soft_del = 0"]
+        if distance_km is None:
+            where.append("u.mesto = %s")
+            params.append(current_city)
+        else:
+            where.append("u.mesto IS NOT NULL AND u.mesto <> ''")
         if target_role:
             where.append("u.rola = %s")
             params.append(target_role)
@@ -215,7 +269,7 @@ def find_best_matches_for_user(
         try:
             cur.execute(
                 f"""
-                SELECT u.id_user, u.meno, u.priezvisko, u.mail, u.rola, e.embedding
+                SELECT u.id_user, u.meno, u.priezvisko, u.mail, u.rola, u.mesto, e.embedding
                 FROM users u
                 JOIN user_embeddings e ON e.user_id = u.id_user
                 WHERE {" AND ".join(where)}
@@ -228,19 +282,37 @@ def find_best_matches_for_user(
 
         results = []
         for row in rows:
+            # Apply distance filter before hobby similarity if requested.
+            if distance_km is not None:
+                other_city = (row.get("mesto") or "").strip()
+                if not other_city:
+                    continue
+                other_coords = get_city_coordinates(other_city)
+                if not other_coords or not current_coords:
+                    continue
+                dist_val = haversine_km(
+                    current_coords[0],
+                    current_coords[1],
+                    other_coords[0],
+                    other_coords[1],
+                )
+                if dist_val > distance_km:
+                    continue
+
             other_emb = np.array(json.loads(row["embedding"]), dtype=float)
             sim = cosine_similarity(emb, other_emb)
-            results.append(
-                {
-                    "id_user": row["id_user"],
-                    "meno": row["meno"],
-                    "priezvisko": row["priezvisko"],
-                    "mail": row["mail"],
-                    "rola": row["rola"],
-                    "similarity": sim,
-                    "similarity_percent": round(sim * 100, 1),
-                }
-            )
+            item = {
+                "id_user": row["id_user"],
+                "meno": row["meno"],
+                "priezvisko": row["priezvisko"],
+                "mail": row["mail"],
+                "rola": row["rola"],
+                "similarity": sim,
+                "similarity_percent": round(sim * 100, 1),
+            }
+            if distance_km is not None:
+                item["distance_km"] = round(dist_val, 1)
+            results.append(item)
 
         # Rank same-city candidates by hobby/interest similarity (cosine distance).
         results.sort(key=lambda x: x["similarity"], reverse=True)
@@ -1678,12 +1750,23 @@ def api_match_user(user_id: int):
         top_n = 5
 
     target_role = request.args.get("role") or None
+    # Read optional distance in kilometers from the request (keeps old behavior if missing).
+    distance_param = request.args.get("distance_km")
+    distance_km = None
+    if distance_param is not None and str(distance_param).strip():
+        try:
+            parsed = float(distance_param)
+            if parsed > 0:
+                distance_km = parsed
+        except (TypeError, ValueError):
+            return jsonify({"error": "Parameter distance_km must be a positive number."}), 400
 
     try:
         matches = find_best_matches_for_user(
             user_id,
             top_n=max(1, top_n),
             target_role=target_role,
+            distance_km=distance_km,
         )
     except Exception as exc:
         logging.exception("Failed to match user %s: %s", user_id, exc)
