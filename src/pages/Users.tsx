@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import MainLayout from "../layouts/MainLayout";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useChat } from "../components/ChatContext";
 
 interface User {
   id_user: number;
@@ -55,6 +56,7 @@ const SORT_OPTIONS = [
 export default function Users() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { openConversationWithUser } = useChat();
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -501,6 +503,20 @@ export default function Users() {
                 </span>
               )}
             </div>
+
+            {/* Tlačidlo na chat – neukazujeme ho pre seba samého */}
+            {currentUserId && currentUserId !== user.id_user && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation(); // aby nepreskočilo na profil
+                  openConversationWithUser(user.id_user);
+                }}
+                className="mt-1 self-start inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700"
+              >
+                Napísať správu
+              </button>
+            )}
 
             {/* Admin akcie */}
             {isAdmin && (

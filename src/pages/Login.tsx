@@ -1,12 +1,14 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import MainLayout from "../layouts/MainLayout";
+import { useChat } from "../components/ChatContext";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const navigate = useNavigate();
+  const { refreshConversations } = useChat();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +31,11 @@ export default function Login() {
 
       // uložíme prihláseného používateľa
       localStorage.setItem("user", JSON.stringify(data.user));
+
+      // 2s (delay) po prihlásení, refreshne inbox pre chat
+      setTimeout(() => {
+        refreshConversations();
+      }, 2000);
 
       setMessage(`Vitaj späť, ${data.user.name}! 👋`);
       setTimeout(() => navigate("/"), 1000);

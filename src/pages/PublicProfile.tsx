@@ -8,6 +8,7 @@ import vzdelavanieImg from "../assets/vzdelavanie.png";
 import pomocSenioromImg from "../assets/pomoc_seniorom.png";
 import spolocenskaAktivitaImg from "../assets/spolocenska_aktivita.png";
 import ineImg from "../assets/ine.png";
+import { useChat } from "../components/ChatContext";
 
 type User = {
   id_user: number;
@@ -99,6 +100,8 @@ export default function PublicProfile() {
     (import.meta as any).env?.VITE_API_URL ?? "http://127.0.0.1:5000";
   const navigate = useNavigate();
 
+  const { openConversationWithUser } = useChat();
+
   // načítanie prihláseného usera (id + rola)
   const { currentUserId, currentUserRole } = useMemo(() => {
     try {
@@ -116,6 +119,11 @@ export default function PublicProfile() {
 
   const isCurrentUserAdmin =
     currentUserRole === "admin" || currentUserId === 1;
+
+  const canStartChat =
+    !!currentUserId &&
+    !!userId &&
+    Number(currentUserId) !== Number(userId);
 
   // ak si otvoríš vlastný public profil → redirect na /profil
   useEffect(() => {
@@ -251,6 +259,15 @@ export default function PublicProfile() {
           <div className="bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-8 flex flex-col items-center text-center space-y-4">
             <AvatarCircle />
             <h2 className="text-2xl font-bold">{fullName}</h2>
+              {canStartChat && (
+              <button
+                type="button"
+                onClick={() => openConversationWithUser(userId!)}
+                className="mt-2 inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Napísať správu
+              </button>
+            )}
           </div>
 
           {/* Základné údaje + O mne */}
