@@ -1672,6 +1672,57 @@ def cancel_signup(activity_id):
     finally:
         conn.close()
 
+# ==========================================
+# ARTICLES
+# ==========================================     
+
+@app.get("/api/articles")
+def list_articles():
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM articles ORDER BY created_at DESC")
+        return jsonify(cur.fetchall())
+    finally:
+        conn.close()
+
+@app.get("/api/articles/<int:id_article>")
+def get_article(id_article):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM articles WHERE id_article = %s", (id_article,))
+        article = cur.fetchone()
+        if not article:
+            return jsonify({"error": "Article not found"}), 404
+        return jsonify(article)
+    finally:
+        conn.close()
+
+@app.post("/api/articles")
+def create_article():
+    data = request.get_json()
+    title = data.get("title")
+    text = data.get("text")
+    image_url = data.get("image_url")
+
+    if not title or not text:
+        return jsonify({"error": "Title and text are required"}), 400
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO articles (title, text, image_url)
+            VALUES (%s, %s, %s)
+        """, (title, text, image_url))
+        conn.commit()
+
+        new_id = cur.lastrowid
+        return jsonify({"id_article": new_id}), 201
+    finally:
+        conn.close()
+
 
 # ==========================================
 # 🚀 MAIN
