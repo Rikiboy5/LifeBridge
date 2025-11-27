@@ -30,8 +30,7 @@ export default function ChatWidget() {
 
   const [draft, setDraft] = useState("");
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
-
-  const currentUserId = useMemo(() => getCurrentUserId(), []);
+  const currentUserId = getCurrentUserId();
   const totalUnread = useMemo(
     () =>
       conversations.reduce(

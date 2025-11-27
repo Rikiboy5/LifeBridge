@@ -1064,6 +1064,8 @@ def get_messages(conv_id):
               m.sender_id,
               m.content,
               m.created_at,
+              m.is_edited,
+              m.edited_at,
               u.meno,
               u.priezvisko
             FROM messages m

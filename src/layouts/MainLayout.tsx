@@ -7,8 +7,6 @@ interface MainLayoutProps {
 }
 import ChatWidget from "../components/ChatWidget";
 
-import ChatWidget from "../components/ChatWidget";
-
 export default function MainLayout({ children }: MainLayoutProps) {
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-gray-50 to-blue-50 dark:from-gray-900 dark:to-gray-800 text-gray-900 dark:text-gray-100">
