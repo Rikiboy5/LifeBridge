@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useChat } from "../components/ChatContext";
 
 type NavUser = { name: string; surname: string; role?: string };
 
@@ -19,7 +20,9 @@ export default function Navbar() {
     setMenuOpen(false);
   }, [location]);
 
+  const { resetChat } = useChat();
   const handleLogout = () => {
+    resetChat();
     localStorage.removeItem("user");
     setUser(null);
     navigate("/");

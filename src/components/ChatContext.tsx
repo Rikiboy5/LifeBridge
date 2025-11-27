@@ -34,6 +34,7 @@ type ChatContextValue = {
   sendMessage: (text: string) => Promise<void>;
   refreshConversations: () => Promise<void>;
   editMessage: (messageId: number, newText: string) => Promise<void>;
+  resetChat: () => void;
 };
 
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
@@ -59,6 +60,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+
+  const resetChat = () => {
+    setConversations([]);
+    setMessages([]);
+    setActiveConversationId(null);
+    setIsOpen(false);
+    lastTotalUnreadRef.current = 0;
+  };
+
   const notificationAudioRef = useRef<HTMLAudioElement | null>(null);
   const lastTotalUnreadRef = useRef(0);
 
@@ -217,16 +227,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const interval = setInterval(() => {
       loadMessages(activeConversationId);
       refreshConversations();
-    }, 5000); // 5 sekúnd
+    }, 3000); // 3 sekúnd
     return () => clearInterval(interval);
   }, [isOpen, activeConversationId]);
-
-  // zvuk pri nových správach
-  useEffect(() => {
-    // načítame zvukový súbor, keď sa provider namountuje
-    const audio = new Audio("/public/new_msg.mp3");
-    notificationAudioRef.current = audio;
-  }, []);
 
     // Globálny refresh inboxu každých 30 sekúnd (aj keď je widget zatvorený)
   useEffect(() => {
@@ -237,6 +240,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(intervalId);
     // dependency array nechávame prázdnu – nech sa interval nastaví len raz
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+    // zvuk pri nových správach
+  useEffect(() => {
+    // načítame zvukový súbor, keď sa provider namountuje
+    const audio = new Audio("/new_msg.mp3");
+    notificationAudioRef.current = audio;
   }, []);
 
   const value: ChatContextValue = {
@@ -251,6 +261,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     sendMessage,
     refreshConversations,
     editMessage,
+    resetChat,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
