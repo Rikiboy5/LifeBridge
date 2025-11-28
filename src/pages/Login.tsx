@@ -34,6 +34,7 @@ export default function Login() {
 
       // 2s (delay) po prihlásení, refreshne inbox pre chat
       setTimeout(() => {
+        console.log("[CHAT] 2s after login -> refreshConversations()");
         refreshConversations();
       }, 2000);
 
