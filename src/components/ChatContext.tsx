@@ -74,6 +74,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const refreshConversations = async () => {
     const currentUserId = getCurrentUserId();
+    console.log("[CHAT] refreshConversations -> currentUserId =", currentUserId);
     if (!currentUserId) return;
 
     const res = await fetch(
@@ -89,17 +90,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       0
     );
 
+    console.log(
+      "[CHAT] conversations loaded:",
+      data.length,
+      "totalUnread =",
+      newTotalUnread
+    );
+
     const prevTotalUnread = lastTotalUnreadRef.current;
 
     // ak pribudli nové neprečítané správy a widget je zavretý -> ping
     if (newTotalUnread > prevTotalUnread && !isOpen) {
+      console.log(
+        "[CHAT] new unread messages detected:",
+        "prevTotalUnread =",
+        prevTotalUnread,
+        "newTotalUnread =",
+        newTotalUnread
+      );
       const audio = notificationAudioRef.current;
       if (audio) {
         // niektoré prehliadače blokujú autoplay bez interakcie, ale po prvom kliku by to malo ísť
         audio
-          .play()
-          .catch(() => {
+          .play().catch((err) => {
             // ticho ignoruj chybu (napr. blokovaný autoplay)
+            console.warn("[CHAT] audio play blocked:", err);
           });
       }
     }
@@ -224,25 +239,61 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // jednoduchý periodický refresh správ pri otvorenom chate a vybratej konverzácii
   useEffect(() => {
     if (!isOpen || !activeConversationId) return;
-    const interval = setInterval(() => {
+    console.log(
+      "[CHAT] start 3s interval (widget OPEN, convId =",
+      activeConversationId,
+      ")"
+    );
+    const intervalId = setInterval(() => {
+      console.log(
+        "[CHAT] ⏱ 3s tick -> loadMessages + refreshConversations (convId =",
+        activeConversationId,
+        ")"
+      );
       loadMessages(activeConversationId);
       refreshConversations();
-    }, 3000); // 3 sekúnd
-    return () => clearInterval(interval);
+    }, 3000); // 3 sekundy
+    return () => {
+      console.log("[CHAT] clear 3s interval (widget CLOSE / conv change)");
+      clearInterval(intervalId);
+    };
   }, [isOpen, activeConversationId]);
 
-    // Globálny refresh inboxu každých 30 sekúnd (aj keď je widget zatvorený)
+  // Globálny refresh inboxu každých 15 sekúnd (aj keď je widget zatvorený)
   useEffect(() => {
-    refreshConversations();
-    const intervalId = setInterval(() => {
+    console.log("[CHAT] start 15s global interval (inbox refresh)");
+    // jedna kontrola hneď po mount-e
+    const initialUserId = getCurrentUserId();
+    if (initialUserId) {
+      console.log(
+        "[CHAT] ⏱ initial -> refreshConversations (global, userId =",
+        initialUserId,
+        ")"
+      );
       refreshConversations();
-    }, 30000); // 30 sekúnd
-    return () => clearInterval(intervalId);
-    // dependency array nechávame prázdnu – nech sa interval nastaví len raz
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    } else {
+      console.log("[CHAT] ⏱ initial skipped - no user");
+    }
+    const intervalId = setInterval(() => {
+      const currentUserId = getCurrentUserId();
+      if (!currentUserId) {
+        console.log("[CHAT] ⏱ 15s tick skipped - no user");
+        return;
+      }
+      console.log(
+        "[CHAT] ⏱ 15s tick -> refreshConversations (global, userId =",
+        currentUserId,
+        ")"
+      );
+      refreshConversations();
+    }, 15000); // 15 sekúnd
+    return () => {
+      console.log("[CHAT] clear 15s global interval (unmount ChatProvider)");
+      clearInterval(intervalId);
+    };
   }, []);
 
-    // zvuk pri nových správach
+  // zvuk pri nových správach
   useEffect(() => {
     // načítame zvukový súbor, keď sa provider namountuje
     const audio = new Audio("/new_msg.mp3");

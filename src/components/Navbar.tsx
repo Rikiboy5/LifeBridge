@@ -25,7 +25,7 @@ export default function Navbar() {
     resetChat();
     localStorage.removeItem("user");
     setUser(null);
-    navigate("/");
+    navigate("/Login");
   };
 
   return (
