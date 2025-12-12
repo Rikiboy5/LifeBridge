@@ -3,6 +3,10 @@ import type { ReactNode } from "react";
 
 type Conversation = {
   id_conversation: number;
+  title?: string | null;
+  display_title?: string | null;
+  participant_count?: number | null;
+  is_group?: boolean | number | null;
   last_message_at: string | null;
   last_message: string | null;
   participant_ids: string;
@@ -27,9 +31,10 @@ type ChatContextValue = {
   activeConversationId: number | null;
   messages: Message[];
   isOpen: boolean;
+  createGroupConversation: (memberUserIds: number[], title: string) => Promise<void>;
   openChat: () => void;
   closeChat: () => void;
-  selectConversation: (conversationId: number) => void;
+  selectConversation: (conversationId: number) => Promise<void>;
   openConversationWithUser: (otherUserId: number) => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
   refreshConversations: () => Promise<void>;
@@ -178,6 +183,59 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
     };
 
+     /* Vytvorí NOVÝ skupinový chat (>= 3 účastníci vrátane prihláseného usera).
+        memberUserIds = ostatní členovia (bez currentUserId). */
+    const createGroupConversation = async (memberUserIds: number[], title: string) => {
+      const currentUserId = getCurrentUserId();
+
+      if (!currentUserId) {
+        console.warn("createGroupConversation: currentUserId je null");
+        setIsOpen(true);
+        return;
+      }
+
+      const cleanedTitle = title.trim();
+      const cleanedMembers = Array.from(new Set(memberUserIds.map((x) => Number(x)))).filter(
+        (x) => Number.isFinite(x) && x > 0 && x !== currentUserId
+      );
+
+      // aspoň 2 "ďalší" členovia -> spolu min 3 ľudia
+      if (!cleanedTitle) {
+        console.warn("createGroupConversation: prázdny názov skupiny");
+        return;
+      }
+      if (cleanedMembers.length < 2) {
+        console.warn("createGroupConversation: treba vybrať aspoň 2 ďalších členov");
+        return;
+      }
+
+      setIsOpen(true);
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/chat/conversations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_ids: [currentUserId, ...cleanedMembers],
+            title: cleanedTitle,
+          }),
+        });
+
+        if (!res.ok) {
+          console.error("createGroupConversation: chyba odpovede", res.status);
+          return;
+        }
+
+        const data = await res.json();
+        const convId = data.id_conversation as number;
+
+        await refreshConversations();
+        await selectConversation(convId);
+      } catch (err) {
+        console.error("createGroupConversation: exception", err);
+      }
+    };
+
     const sendMessage = async (text: string) => {
         const currentUserId = getCurrentUserId();
         if (!currentUserId || !activeConversationId) return;
@@ -305,6 +363,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     activeConversationId,
     messages,
     isOpen,
+    createGroupConversation,
     openChat,
     closeChat,
     selectConversation,
