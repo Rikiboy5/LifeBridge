@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useChat } from "./ChatContext";
 import { MessageCircle } from "lucide-react";
+import ChatJitsiCall from "./ChatJitsiCall";
 
 type MatchUser = {
   id_user: number;
@@ -153,15 +154,37 @@ export default function ChatWidget() {
     setSelectedMemberIds([]);
   };
 
-  const activeConv = useMemo(
+    const activeConv = useMemo(
     () => conversations.find((c) => c.id_conversation === activeConversationId) ?? null,
     [conversations, activeConversationId]
   );
 
+  // názov Jitsi miestnosti – rovnaký pre všetkých účastníkov danej konverzácie
+  const roomName = useMemo(() => {
+    if (!activeConversationId) return null;
+    return `lifebridge-conversation-${activeConversationId}`;
+  }, [activeConversationId]);
+
+  // stav pre otvorenie / zatvorenie video-okna
+  const [isVideoOpen, setIsVideoOpen] = useState(false);
+
+  const handleOpenVideo = () => {
+    if (!roomName) return;
+    setIsVideoOpen(true);
+  };
+
+  const handleCloseVideo = () => {
+    setIsVideoOpen(false);
+  };
+
   const activeParticipantCount = useMemo(() => {
     if (!activeConv?.participant_ids) return 0;
-    return activeConv.participant_ids.split(",").map((s) => s.trim()).filter(Boolean).length;
+    return activeConv.participant_ids
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean).length;
   }, [activeConv]);
+
 
   const isActiveGroup = activeParticipantCount > 2;
 
@@ -457,20 +480,33 @@ export default function ChatWidget() {
                       "Konverzácia"}
                   </div>
 
-                  {isActiveGroup && (
+                  <div className="flex items-center gap-2">
+                    {isActiveGroup && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = !membersOpen;
+                          setMembersOpen(next);
+                          if (next && activeConversationId != null) {
+                            loadMembers(activeConversationId);
+                          }
+                          console.log("[CHAT][GROUP] toggle members", next);
+                        }}
+                        className="text-sm px-3 py-1 rounded-md border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
+                      >
+                        Členovia
+                      </button>
+                    )}
+
                     <button
                       type="button"
-                      onClick={() => {
-                        const next = !membersOpen;
-                        setMembersOpen(next);
-                        if (next) loadMembers(activeConversationId);
-                        console.log("[CHAT][GROUP] toggle members", next);
-                      }}
-                      className="text-sm px-3 py-1 rounded-md border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
+                      disabled={!roomName}
+                      onClick={handleOpenVideo}
+                      className="text-sm px-3 py-1 rounded-md border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Členovia
+                      🎥 Hovor
                     </button>
-                  )}
+                  </div>
                 </div>
               )}
 
@@ -621,6 +657,11 @@ export default function ChatWidget() {
           </div>
         )}
       </div>
+        <ChatJitsiCall
+          roomName={roomName}
+          isOpen={isVideoOpen}
+          onClose={handleCloseVideo}
+        />
     </>
   );
 }

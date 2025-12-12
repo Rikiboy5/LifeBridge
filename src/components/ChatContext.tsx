@@ -298,28 +298,28 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isOpen || !activeConversationId) return;
     console.log(
-      "[CHAT] start 3s interval (widget OPEN, convId =",
+      "[CHAT] start 5s interval (widget OPEN, convId =",
       activeConversationId,
       ")"
     );
     const intervalId = setInterval(() => {
       console.log(
-        "[CHAT] ⏱ 3s tick -> loadMessages + refreshConversations (convId =",
+        "[CHAT] ⏱ 5s tick -> loadMessages + refreshConversations (convId =",
         activeConversationId,
         ")"
       );
       loadMessages(activeConversationId);
       refreshConversations();
-    }, 3000); // 3 sekundy
+    }, 5000); // 5 sekundy
     return () => {
-      console.log("[CHAT] clear 3s interval (widget CLOSE / conv change)");
+      console.log("[CHAT] clear 5s interval (widget CLOSE / conv change)");
       clearInterval(intervalId);
     };
   }, [isOpen, activeConversationId]);
 
   // Globálny refresh inboxu každých 15 sekúnd (aj keď je widget zatvorený)
   useEffect(() => {
-    console.log("[CHAT] start 15s global interval (inbox refresh)");
+    console.log("[CHAT] start 20s global interval (inbox refresh)");
     // jedna kontrola hneď po mount-e
     const initialUserId = getCurrentUserId();
     if (initialUserId) {
@@ -335,16 +335,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const intervalId = setInterval(() => {
       const currentUserId = getCurrentUserId();
       if (!currentUserId) {
-        console.log("[CHAT] ⏱ 15s tick skipped - no user");
+        console.log("[CHAT] ⏱ 20s tick skipped - no user");
         return;
       }
       console.log(
-        "[CHAT] ⏱ 15s tick -> refreshConversations (global, userId =",
+        "[CHAT] ⏱ 20s tick -> refreshConversations (global, userId =",
         currentUserId,
         ")"
       );
       refreshConversations();
-    }, 15000); // 15 sekúnd
+    }, 20000); // 20 sekúnd
     return () => {
       console.log("[CHAT] clear 15s global interval (unmount ChatProvider)");
       clearInterval(intervalId);
