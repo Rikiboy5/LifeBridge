@@ -3,6 +3,10 @@ import type { ReactNode } from "react";
 
 type Conversation = {
   id_conversation: number;
+  title?: string | null;
+  display_title?: string | null;
+  participant_count?: number | null;
+  is_group?: boolean | number | null;
   last_message_at: string | null;
   last_message: string | null;
   participant_ids: string;
@@ -27,13 +31,15 @@ type ChatContextValue = {
   activeConversationId: number | null;
   messages: Message[];
   isOpen: boolean;
+  createGroupConversation: (memberUserIds: number[], title: string) => Promise<void>;
   openChat: () => void;
   closeChat: () => void;
-  selectConversation: (conversationId: number) => void;
+  selectConversation: (conversationId: number) => Promise<void>;
   openConversationWithUser: (otherUserId: number) => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
   refreshConversations: () => Promise<void>;
   editMessage: (messageId: number, newText: string) => Promise<void>;
+  resetChat: () => void;
 };
 
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
@@ -59,11 +65,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+
+  const resetChat = () => {
+    setConversations([]);
+    setMessages([]);
+    setActiveConversationId(null);
+    setIsOpen(false);
+    lastTotalUnreadRef.current = 0;
+  };
+
   const notificationAudioRef = useRef<HTMLAudioElement | null>(null);
   const lastTotalUnreadRef = useRef(0);
 
   const refreshConversations = async () => {
     const currentUserId = getCurrentUserId();
+    console.log("[CHAT] refreshConversations -> currentUserId =", currentUserId);
     if (!currentUserId) return;
 
     const res = await fetch(
@@ -79,17 +95,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       0
     );
 
+    console.log(
+      "[CHAT] conversations loaded:",
+      data.length,
+      "totalUnread =",
+      newTotalUnread
+    );
+
     const prevTotalUnread = lastTotalUnreadRef.current;
 
     // ak pribudli nové neprečítané správy a widget je zavretý -> ping
     if (newTotalUnread > prevTotalUnread && !isOpen) {
+      console.log(
+        "[CHAT] new unread messages detected:",
+        "prevTotalUnread =",
+        prevTotalUnread,
+        "newTotalUnread =",
+        newTotalUnread
+      );
       const audio = notificationAudioRef.current;
       if (audio) {
         // niektoré prehliadače blokujú autoplay bez interakcie, ale po prvom kliku by to malo ísť
         audio
-          .play()
-          .catch(() => {
+          .play().catch((err) => {
             // ticho ignoruj chybu (napr. blokovaný autoplay)
+            console.warn("[CHAT] audio play blocked:", err);
           });
       }
     }
@@ -150,6 +180,59 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           await selectConversation(convId);
       } catch (err) {
           console.error("openConversationWithUser: exception", err);
+      }
+    };
+
+     /* Vytvorí NOVÝ skupinový chat (>= 3 účastníci vrátane prihláseného usera).
+        memberUserIds = ostatní členovia (bez currentUserId). */
+    const createGroupConversation = async (memberUserIds: number[], title: string) => {
+      const currentUserId = getCurrentUserId();
+
+      if (!currentUserId) {
+        console.warn("createGroupConversation: currentUserId je null");
+        setIsOpen(true);
+        return;
+      }
+
+      const cleanedTitle = title.trim();
+      const cleanedMembers = Array.from(new Set(memberUserIds.map((x) => Number(x)))).filter(
+        (x) => Number.isFinite(x) && x > 0 && x !== currentUserId
+      );
+
+      // aspoň 2 "ďalší" členovia -> spolu min 3 ľudia
+      if (!cleanedTitle) {
+        console.warn("createGroupConversation: prázdny názov skupiny");
+        return;
+      }
+      if (cleanedMembers.length < 2) {
+        console.warn("createGroupConversation: treba vybrať aspoň 2 ďalších členov");
+        return;
+      }
+
+      setIsOpen(true);
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/chat/conversations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_ids: [currentUserId, ...cleanedMembers],
+            title: cleanedTitle,
+          }),
+        });
+
+        if (!res.ok) {
+          console.error("createGroupConversation: chyba odpovede", res.status);
+          return;
+        }
+
+        const data = await res.json();
+        const convId = data.id_conversation as number;
+
+        await refreshConversations();
+        await selectConversation(convId);
+      } catch (err) {
+        console.error("createGroupConversation: exception", err);
       }
     };
 
@@ -214,29 +297,65 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // jednoduchý periodický refresh správ pri otvorenom chate a vybratej konverzácii
   useEffect(() => {
     if (!isOpen || !activeConversationId) return;
-    const interval = setInterval(() => {
+    console.log(
+      "[CHAT] start 5s interval (widget OPEN, convId =",
+      activeConversationId,
+      ")"
+    );
+    const intervalId = setInterval(() => {
+      console.log(
+        "[CHAT] ⏱ 5s tick -> loadMessages + refreshConversations (convId =",
+        activeConversationId,
+        ")"
+      );
       loadMessages(activeConversationId);
       refreshConversations();
-    }, 5000); // 5 sekúnd
-    return () => clearInterval(interval);
+    }, 5000); // 5 sekundy
+    return () => {
+      console.log("[CHAT] clear 5s interval (widget CLOSE / conv change)");
+      clearInterval(intervalId);
+    };
   }, [isOpen, activeConversationId]);
+
+  // Globálny refresh inboxu každých 15 sekúnd (aj keď je widget zatvorený)
+  useEffect(() => {
+    console.log("[CHAT] start 20s global interval (inbox refresh)");
+    // jedna kontrola hneď po mount-e
+    const initialUserId = getCurrentUserId();
+    if (initialUserId) {
+      console.log(
+        "[CHAT] ⏱ initial -> refreshConversations (global, userId =",
+        initialUserId,
+        ")"
+      );
+      refreshConversations();
+    } else {
+      console.log("[CHAT] ⏱ initial skipped - no user");
+    }
+    const intervalId = setInterval(() => {
+      const currentUserId = getCurrentUserId();
+      if (!currentUserId) {
+        console.log("[CHAT] ⏱ 20s tick skipped - no user");
+        return;
+      }
+      console.log(
+        "[CHAT] ⏱ 20s tick -> refreshConversations (global, userId =",
+        currentUserId,
+        ")"
+      );
+      refreshConversations();
+    }, 20000); // 20 sekúnd
+    return () => {
+      console.log("[CHAT] clear 15s global interval (unmount ChatProvider)");
+      clearInterval(intervalId);
+    };
+  }, []);
 
   // zvuk pri nových správach
   useEffect(() => {
     // načítame zvukový súbor, keď sa provider namountuje
-    const audio = new Audio("/public/new_msg.mp3");
+    const audio = new Audio("/new_msg.mp3");
     notificationAudioRef.current = audio;
-  }, []);
-
-    // Globálny refresh inboxu každých 30 sekúnd (aj keď je widget zatvorený)
-  useEffect(() => {
-    refreshConversations();
-    const intervalId = setInterval(() => {
-      refreshConversations();
-    }, 30000); // 30 sekúnd
-    return () => clearInterval(intervalId);
-    // dependency array nechávame prázdnu – nech sa interval nastaví len raz
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const value: ChatContextValue = {
@@ -244,6 +363,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     activeConversationId,
     messages,
     isOpen,
+    createGroupConversation,
     openChat,
     closeChat,
     selectConversation,
@@ -251,6 +371,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     sendMessage,
     refreshConversations,
     editMessage,
+    resetChat,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

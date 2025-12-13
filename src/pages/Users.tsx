@@ -396,7 +396,6 @@ export default function Users() {
           </p>
         </div>
       </div>
-
       {isMatchMode && (
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <label className="text-sm text-gray-600 dark:text-gray-300">
@@ -408,7 +407,7 @@ export default function Users() {
             className="border rounded-xl px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:border-gray-700"
             aria-label="Filter vzdialenosti"
           >
-            <option value="">Bez obmedzenia</option>
+            <option value="">0 km</option>
             <option value="10">do 10 km</option>
             <option value="25">do 25 km</option>
             <option value="50">do 50 km</option>

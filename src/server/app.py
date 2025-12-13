@@ -16,7 +16,6 @@ from sentence_transformers import SentenceTransformer
 EMBEDDING_MODEL_NAME = "intfloat/multilingual-e5-base"
 model = SentenceTransformer(EMBEDDING_MODEL_NAME)
 
-
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 bcrypt = Bcrypt(app)
@@ -156,7 +155,6 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     if denom == 0.0:
         return 0.0
     return float(np.dot(a, b) / denom)
-
 
 # Simple in-memory cache so we do not geocode the same city repeatedly.
 CITY_COORD_CACHE: dict[str, tuple[float, float]] = {}
@@ -1016,34 +1014,47 @@ def upsert_user_rating(user_id):
 def create_or_get_conversation():
     data = request.get_json(force=True) or {}
     user_ids = data.get("user_ids")
+    title = (data.get("title") or "").strip()
 
     if not isinstance(user_ids, list) or len(user_ids) < 2:
         return jsonify({"error": "Potrebujem aspoň dvoch účastníkov."}), 400
 
     # odstránime duplicity + zoradíme, nech je to deterministické
     user_ids = sorted({int(uid) for uid in user_ids})
+    is_group = len(user_ids) > 2
+
+    # title používame len pre skupiny; pre 1:1 ho ignorujeme
+    if is_group and not title:
+        return jsonify({"error": "Chýba názov skupiny."}), 400
 
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
     try:
-        # nájsť konverzáciu, ktorá má presne týchto účastníkov a nikoho navyše
-        placeholders = ", ".join(["%s"] * len(user_ids))
-        query = f"""
-            SELECT c.id_conversation
-            FROM conversations c
-            JOIN conversation_participants cp ON cp.id_conversation = c.id_conversation
-            WHERE cp.id_user IN ({placeholders})
-            GROUP BY c.id_conversation
-            HAVING COUNT(*) = %s
-        """
-        cur.execute(query, (*user_ids, len(user_ids)))
-        row = cur.fetchone()
+        # 1:1 – nájdi existujúcu konverzáciu s presne tými účastníkmi
+        # (pozor: pôvodný WHERE cp.id_user IN (...) vedel omylom trafiť aj skupinu)
+        if not is_group:
+            placeholders = ", ".join(["%s"] * len(user_ids))
+            query = f"""
+                SELECT MIN(c.id_conversation) AS id_conversation
+                FROM conversations c
+                JOIN conversation_participants cp ON cp.id_conversation = c.id_conversation
+                GROUP BY c.id_conversation
+                HAVING
+                  SUM(CASE WHEN cp.id_user IN ({placeholders}) THEN 1 ELSE 0 END) = %s
+                  AND COUNT(*) = %s
+                LIMIT 1
+            """
+            cur.execute(query, (*user_ids, len(user_ids), len(user_ids)))
+            row = cur.fetchone()
+            if row and row.get("id_conversation"):
+                return jsonify({"id_conversation": row["id_conversation"], "created": False}), 200
 
-        if row:
-            return jsonify({"id_conversation": row["id_conversation"], "created": False}), 200
+        # Skupina (alebo nové 1:1) – vytvoríme novú konverzáciu
+        if is_group:
+            cur.execute("INSERT INTO conversations (title) VALUES (%s)", (title,))
+        else:
+            cur.execute("INSERT INTO conversations () VALUES ()")
 
-        # neexistuje - vytvoríme novú
-        cur.execute("INSERT INTO conversations () VALUES ()")
         conv_id = cur.lastrowid
 
         cur.executemany(
@@ -1072,13 +1083,18 @@ def list_conversations():
             """
             SELECT
               c.id_conversation,
+              c.title,
+              COUNT(DISTINCT cp.id_user) AS participant_count,
+              (COUNT(DISTINCT cp.id_user) > 2) AS is_group,
+
               MAX(m.created_at) AS last_message_at,
               SUBSTRING_INDEX(
                   MAX(CONCAT(m.created_at, '|||', m.content)),
                   '|||', -1
               ) AS last_message,
               GROUP_CONCAT(DISTINCT cp.id_user) AS participant_ids,
-              -- "ten druhý" používateľ v 1:1 chate
+
+              -- "ten druhý" používateľ v 1:1 chate (pre skupiny sa ignoruje)
               MAX(CASE WHEN cp.id_user <> %s THEN cp.id_user END) AS other_user_id,
               MAX(
                 CASE
@@ -1086,6 +1102,15 @@ def list_conversations():
                   ELSE NULL
                 END
               ) AS other_user_name,
+
+              -- UI-friendly názov konverzácie:
+              CASE
+                WHEN c.title IS NOT NULL AND c.title <> '' THEN c.title
+                WHEN COUNT(DISTINCT cp.id_user) = 2 THEN
+                  MAX(CASE WHEN cp.id_user <> %s THEN CONCAT(u.meno, ' ', u.priezvisko) END)
+                ELSE CONCAT('Skupina (', COUNT(DISTINCT cp.id_user), ')')
+              END AS display_title,
+
               -- počet neprečítaných správ pre aktuálneho používateľa
               (
                 SELECT COUNT(*)
@@ -1094,22 +1119,25 @@ def list_conversations():
                   AND (cp_me.last_read_message_id IS NULL OR m2.id_message > cp_me.last_read_message_id)
                   AND m2.sender_id <> %s
               ) AS unread_count
+
             FROM conversations c
-            -- riadok pre aktuálneho používateľa v conversation_participants
+
             JOIN conversation_participants cp_me
               ON cp_me.id_conversation = c.id_conversation
              AND cp_me.id_user = %s
-            -- všetci účastníci (pre meno, participant_ids)
+
             JOIN conversation_participants cp
               ON cp.id_conversation = c.id_conversation
             JOIN users u
               ON u.id_user = cp.id_user
+
             LEFT JOIN messages m
               ON m.id_conversation = c.id_conversation
+
             GROUP BY c.id_conversation
             ORDER BY last_message_at DESC
             """,
-            (user_id, user_id, user_id, user_id),
+            (user_id, user_id, user_id, user_id, user_id),
         )
 
         rows = cur.fetchall()
@@ -1138,6 +1166,8 @@ def get_messages(conv_id):
               m.sender_id,
               m.content,
               m.created_at,
+              m.is_edited,
+              m.edited_at,
               u.meno,
               u.priezvisko
             FROM messages m
@@ -1232,6 +1262,45 @@ def edit_message(message_id):
         )
         conn.commit()
         return jsonify({"success": True}), 200
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/chat/conversations/<int:conv_id>/participants")
+def get_conversation_participants(conv_id: int):
+    user_id = request.args.get("user_id", type=int)
+    if not user_id:
+        return jsonify({"error": "Chýba user_id."}), 400
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        # bezpečnosť: len člen konverzácie môže vidieť členov
+        cur.execute(
+            """
+            SELECT 1
+            FROM conversation_participants
+            WHERE id_conversation = %s AND id_user = %s
+            LIMIT 1
+            """,
+            (conv_id, user_id),
+        )
+        if not cur.fetchone():
+            return jsonify({"error": "Nemáš prístup k tejto konverzácii."}), 403
+
+        cur.execute(
+            """
+            SELECT u.id_user, u.meno, u.priezvisko
+            FROM conversation_participants cp
+            JOIN users u ON u.id_user = cp.id_user
+            WHERE cp.id_conversation = %s
+            ORDER BY u.meno ASC, u.priezvisko ASC
+            """,
+            (conv_id,),
+        )
+        rows = cur.fetchall()
+        return jsonify(rows), 200
     finally:
         cur.close()
         conn.close()

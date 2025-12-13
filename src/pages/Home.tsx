@@ -149,7 +149,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [currentUserId, distanceKm]);
+  }, [currentUserId, distanceKm]);  
 
   // ---- LOAD TOP USERS ----
   useEffect(() => {
