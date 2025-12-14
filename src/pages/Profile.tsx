@@ -174,7 +174,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (!viewedUserId) return;
-    fetch(`${baseUrl}/api/profile/${viewedUserId}`)
+    fetch(`/api/profile/${viewedUserId}`)
       .then((r) => r.json())
       .then((data) => {
         const normalized: User = {
@@ -200,9 +200,9 @@ export default function Profile() {
     (async () => {
       try {
         const [allRes, catsRes, userRes] = await Promise.all([
-          fetch(`${baseUrl}/api/hobbies`),
-          fetch(`${baseUrl}/api/hobby-categories`),
-          fetch(`${baseUrl}/api/profile/${viewedUserId}/hobbies`),
+          fetch(`/api/hobbies`),
+          fetch(`/api/hobby-categories`),
+          fetch(`/api/profile/${viewedUserId}/hobbies`),
         ]);
         if (allRes.ok) setHobbies((await allRes.json()) || []);
         if (catsRes.ok) setCategories((await catsRes.json()) || []);
@@ -230,7 +230,7 @@ export default function Profile() {
     setSavingHobbies(true);
     try {
       const res = await fetch(
-        `${baseUrl}/api/profile/${viewedUserId}/hobbies`,
+        `/api/profile/${viewedUserId}/hobbies`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -253,7 +253,7 @@ export default function Profile() {
     if (!viewedUserId) return;
     try {
       const res = await fetch(
-        `${baseUrl}/api/posts?author_id=${viewedUserId}`
+        `/api/posts?author_id=${viewedUserId}`
       );
       if (!res.ok) return;
       const data = await res.json();
@@ -281,14 +281,14 @@ export default function Profile() {
     (async () => {
       try {
         const res = await fetch(
-          `${baseUrl}/api/profile/${viewedUserId}/avatar`
+          `/api/profile/${viewedUserId}/avatar`
         );
         if (!res.ok) {
           setAvatarSrc(null);
           return;
         }
         const data = await res.json();
-        if (data?.url) setAvatarSrc(`${baseUrl}${data.url}`);
+        if (data?.url) setAvatarSrc(`${data.url}`);
       } catch {
         setAvatarSrc(null);
       }
@@ -465,7 +465,7 @@ export default function Profile() {
         return;
       }
 
-      const res = await fetch(`${baseUrl}/api/profile/${profile.id_user}`, {
+      const res = await fetch(`/api/profile/${profile.id_user}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(changed),
@@ -498,7 +498,7 @@ export default function Profile() {
       return;
     }
     try {
-      const res = await fetch(`${baseUrl}/api/users/${profile.id_user}`, {
+      const res = await fetch(`/api/users/${profile.id_user}`, {
         method: "DELETE",
       });
       const data = await res.json().catch(() => null);
@@ -526,7 +526,7 @@ export default function Profile() {
     }
     const payload = { ...postData, user_id: viewedUserId };
     try {
-      const res = await fetch(`${baseUrl}/api/posts`, {
+      const res = await fetch(`/api/posts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -553,7 +553,7 @@ export default function Profile() {
   }) => {
     if (!editingPost || !canEditProfile) return;
     try {
-      const res = await fetch(`${baseUrl}/api/posts/${editingPost.id_post}`, {
+      const res = await fetch(`/api/posts/${editingPost.id_post}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...postData, id_post: editingPost.id_post }),
@@ -576,7 +576,7 @@ export default function Profile() {
   const handleDeletePost = async (id: number) => {
     if (!canEditProfile) return;
     try {
-      const res = await fetch(`${baseUrl}/api/posts/${id}`, {
+      const res = await fetch(`/api/posts/${id}`, {
         method: "DELETE",
       });
       if (res.ok) await fetchMyPosts();
@@ -873,7 +873,7 @@ export default function Profile() {
                         fd.append("file", file);
                         try {
                           const res = await fetch(
-                            `${baseUrl}/api/profile/${profile.id_user}/avatar`,
+                            `/api/profile/${profile.id_user}/avatar`,
                             { method: "POST", body: fd }
                           );
                           const data = await res.json();
@@ -882,7 +882,7 @@ export default function Profile() {
                               data?.error || "Upload zlyhal"
                             );
                           if (data?.url)
-                            setAvatarSrc(`${baseUrl}${data.url}`);
+                            setAvatarSrc(`${data.url}`);
                         } catch (err) {
                           alert("Nepodarilo sa nahrať avatar.");
                         }

@@ -371,7 +371,7 @@ export default function ChatbotWidgetSKv9() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<React.ReactNode[]>([]);
   const [routes, setRoutes] = useState<RouteInfo[]>(FALLBACK_ROUTES);
-  const [faq, setFaq] = useState<QA[]>(FALLBACK_FAQ);
+  const [faq] = useState<QA[]>(FALLBACK_FAQ);
   const [offers, setOffers] = useState<Offer[]>([]);
 
   const lang: Lang = "sk";
@@ -387,9 +387,9 @@ export default function ChatbotWidgetSKv9() {
   const [greetSpoken, setGreetSpoken] = useState<boolean>(false);
   const [dims, setDims] = useState<{w:number; h:number}>({ w: 390, h: 620 });
   // Registration voice helper state
-  const [regHelperOffered, setRegHelperOffered] = useState<boolean>(false);
-  const [regActive, setRegActive] = useState<boolean>(false);
-  const [regPhase, setRegPhase] = useState<"idle"|"step1"|"step2">("idle");
+  const [regHelperOffered] = useState<boolean>(false);
+  const [regActive] = useState<boolean>(false);
+  const [regPhase] = useState<"idle"|"step1"|"step2">("idle");
 
   const navigate = useNavigate();
   const location = useLocation();

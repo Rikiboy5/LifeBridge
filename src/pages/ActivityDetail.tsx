@@ -27,7 +27,7 @@ export default function ActivityDetail() {
     const fetchActivity = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`http://127.0.0.1:5000/api/activities`);
+        const res = await fetch(`/api/activities`);
         const data = await res.json();
         const list = Array.isArray(data) ? data : data.items ?? [];
         const found = list.find((a: any) => a.id_activity === Number(id));

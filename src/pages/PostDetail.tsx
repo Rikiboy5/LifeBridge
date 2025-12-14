@@ -105,7 +105,7 @@ export default function PostDetail() {
     if (!id) return;
     setLoading(true);
     setError(null);
-    fetch(`${API_BASE}/api/posts/${id}`)
+    fetch(`/api/posts/${id}`)
       .then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Nepodarilo sa nacitat prispevok.");
@@ -132,8 +132,8 @@ export default function PostDetail() {
     setProfile(null);
     setProfileError(null);
     Promise.all([
-      fetch(`${API_BASE}/api/profile/${post.user_id}`),
-      fetch(`${API_BASE}/api/profile/${post.user_id}/avatar`),
+      fetch(`/api/profile/${post.user_id}`),
+      fetch(`/api/profile/${post.user_id}/avatar`),
     ])
       .then(async ([profileRes, avatarRes]) => {
         const profileData = await profileRes.json();
@@ -142,7 +142,7 @@ export default function PostDetail() {
         let avatar: string | null = null;
         if (avatarRes.ok) {
           const a = await avatarRes.json();
-          if (a?.url) avatar = `${API_BASE}${a.url}`;
+          if (a?.url) avatar = `${a.url}`;
         }
         return { profileData: profileData as AuthorProfile, avatar };
       })
@@ -182,7 +182,7 @@ export default function PostDetail() {
         description: formDescription,
         image: formImage ?? null,
       };
-      const res = await fetch(`${API_BASE}/api/posts/${post.id_post}`, {
+      const res = await fetch(`/api/posts/${post.id_post}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

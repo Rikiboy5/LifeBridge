@@ -156,7 +156,7 @@ export default function Posts() {
       setSearching(usingSearch);
       setError(null);
 
-      const res = await fetch(`${API_BASE}/api/posts?${qs.toString()}`, {
+      const res = await fetch(`/api/posts?${qs.toString()}`, {
         signal,
       });
       if (!res.ok) throw new Error(await res.text());
@@ -201,7 +201,7 @@ export default function Posts() {
   }) => {
     if (!user) return alert("Musis byt prihlaseny!");
     const payload = { ...postData, user_id: user.id || user.id_user };
-    const res = await fetch(`${API_BASE}/api/posts`, {
+    const res = await fetch(`/api/posts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -222,7 +222,7 @@ export default function Posts() {
   }) => {
     if (!editingPost) return;
     const payload = { ...postData, id_post: editingPost.id_post };
-    const res = await fetch(`${API_BASE}/api/posts/${editingPost.id_post}`, {
+    const res = await fetch(`/api/posts/${editingPost.id_post}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -237,7 +237,7 @@ export default function Posts() {
   };
 
   const handleDeletePost = async (id: number) => {
-    const res = await fetch(`${API_BASE}/api/posts/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/posts/${id}`, { method: "DELETE" });
     if (res.ok) await refreshAfterChange();
   };
 

@@ -23,7 +23,7 @@ export default function Blog() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch("http://127.0.0.1:5000/api/activities");
+        const res = await fetch("/api/activities");
         if (!res.ok) throw new Error("Nepodarilo sa načítať aktivity.");
         const json = await res.json();
 

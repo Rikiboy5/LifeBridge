@@ -268,10 +268,10 @@ export default function Users() {
       const results = await Promise.all(
         missing.map(async (u) => {
           try {
-            const res = await fetch(`${baseUrl}/api/profile/${u.id_user}/avatar`);
+            const res = await fetch(`/api/profile/${u.id_user}/avatar`);
             if (!res.ok) return [u.id_user, null] as const;
             const data = await res.json();
-            const url = data?.url ? `${baseUrl}${data.url}` : null;
+            const url = data?.url ? `${data.url}` : null;
             return [u.id_user, url] as const;
           } catch {
             return [u.id_user, null] as const;

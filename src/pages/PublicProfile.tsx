@@ -147,10 +147,10 @@ export default function PublicProfile() {
         setLoading(true);
         setError(null);
         const [uRes, pRes, hRes, aRes] = await Promise.all([
-          fetch(`${baseUrl}/api/profile/${userId}`),
-          fetch(`${baseUrl}/api/posts?author_id=${userId}`),
-          fetch(`${baseUrl}/api/profile/${userId}/hobbies`),
-          fetch(`${baseUrl}/api/profile/${userId}/avatar`),
+          fetch(`/api/profile/${userId}`),
+          fetch(`/api/posts?author_id=${userId}`),
+          fetch(`/api/profile/${userId}/hobbies`),
+          fetch(`/api/profile/${userId}/avatar`),
         ]);
         if (!uRes.ok) throw new Error("Nepodarilo sa načítať profil");
 
