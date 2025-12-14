@@ -97,7 +97,7 @@ export default function PublicProfile() {
   }, [id]);
 
   const baseUrl =
-    (import.meta as any).env?.VITE_API_URL ?? "http://127.0.0.1:5000";
+    (import.meta as any).env?.VITE_API_URL ?? "";
   const navigate = useNavigate();
 
   const { openConversationWithUser } = useChat();

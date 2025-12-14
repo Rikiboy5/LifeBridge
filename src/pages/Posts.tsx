@@ -9,7 +9,7 @@ import pomocSenioromImg from "../assets/pomoc_seniorom.png";
 import spolocenskaAktivitaImg from "../assets/spolocenska_aktivita.png";
 import ineImg from "../assets/ine.png";
 
-const API_BASE = "http://127.0.0.1:5000";
+const API_BASE = "";
 
 interface User {
   id?: number;

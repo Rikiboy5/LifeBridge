@@ -45,7 +45,7 @@ type ChatContextValue = {
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ?? "http://127.0.0.1:5000"; // uprav podľa projektu
+  import.meta.env.VITE_API_URL ?? ""; // uprav podľa projektu
 
 // získanie prihláseného usera – prispôsob si podľa toho, ako to máš riešené
 const getCurrentUserId = (): number | null => {

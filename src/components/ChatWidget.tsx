@@ -18,7 +18,7 @@ type Member = {
 };
 
 const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_URL ?? "http://127.0.0.1:5000";
+  (import.meta as any).env?.VITE_API_URL ?? "";
 
 const getCurrentUserId = () => {
   try {

@@ -72,7 +72,7 @@ export default function Users() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
 
   const baseUrl =
-    (import.meta as any).env?.VITE_API_URL ?? "http://127.0.0.1:5000";
+    (import.meta as any).env?.VITE_API_URL ?? "";
 
   const initialFetchRef = useRef(false);
   const searchDebounceRef = useRef<number | null>(null);
