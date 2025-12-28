@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useChat } from "./ChatContext";
-import { MessageCircle } from "lucide-react";
+import { MessageCircle, X } from "lucide-react";
 import ChatJitsiCall from "./ChatJitsiCall";
 
 type MatchUser = {
@@ -243,14 +243,6 @@ export default function ChatWidget() {
 
   return (
     <>
-      {/* bublina zostane aj pri otvorenom okne, môžeš ju schovať ak chceš */}
-      <button
-        onClick={closeChat}
-        aria-label="Zavrieť chat"
-        className="fixed bottom-20 right-3 w-14 h-14 rounded-full shadow-lg bg-blue-600 text-white flex items-center justify-center text-lg z-40"
-      >
-        ✕
-      </button>
 
       <div className="fixed bottom-24 right-4 w-[480px] h-[640px] max-w-[92vw] max-h-[72vh] bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-2xl shadow-2xl flex flex-col z-40 text-base">
         <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -291,10 +283,15 @@ export default function ChatWidget() {
           </div>
 
           <button
+            type="button"
             onClick={closeChat}
-            className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+            aria-label="Zavrieť chat"
+            title="Zavrieť"
+            className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-red-600 text-white shadow-md hover:bg-red-700 active:scale-[0.98] transition
+                      focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-white
+                      dark:focus-visible:ring-offset-gray-900"
           >
-            Zavrieť
+            <X className="w-5 h-5" />
           </button>
         </div>
 
@@ -518,9 +515,13 @@ export default function ChatWidget() {
                       <button
                         type="button"
                         onClick={() => setMembersOpen(false)}
-                        className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                        aria-label="Zavrieť"
+                        title="Zavrieť"
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition
+                                  dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700
+                                  focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                       >
-                        Zavrieť
+                        <X className="w-4 h-4" />
                       </button>
                     </div>
 
