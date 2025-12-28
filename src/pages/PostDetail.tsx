@@ -8,7 +8,16 @@ import pomocSenioromImg from "../assets/pomoc_seniorom.png";
 import spolocenskaAktivitaImg from "../assets/spolocenska_aktivita.png";
 import ineImg from "../assets/ine.png";
 
-const API_BASE = "";
+const API_BASE = (() => {
+  const env = (import.meta as any).env?.VITE_API_URL ?? "";
+  if (env) return env.replace(/\/$/, "");
+  if (typeof window !== "undefined") {
+    const origin = window.location.origin;
+    if (origin.includes(":5173")) return origin.replace(":5173", ":5000");
+    return origin;
+  }
+  return "";
+})();
 
 interface User {
   id?: number;
@@ -142,7 +151,7 @@ export default function PostDetail() {
         let avatar: string | null = null;
         if (avatarRes.ok) {
           const a = await avatarRes.json();
-          if (a?.url) avatar = `${a.url}`;
+          if (a?.url) avatar = `${API_BASE}${a.url}`;
         }
         return { profileData: profileData as AuthorProfile, avatar };
       })

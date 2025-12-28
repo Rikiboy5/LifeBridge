@@ -71,8 +71,16 @@ export default function Users() {
 
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
 
-  const baseUrl =
-    (import.meta as any).env?.VITE_API_URL ?? "";
+  const baseUrl = useMemo(() => {
+    const env = (import.meta as any).env?.VITE_API_URL ?? "";
+    if (env) return env.replace(/\/$/, "");
+    if (typeof window !== "undefined") {
+      const origin = window.location.origin;
+      if (origin.includes(":5173")) return origin.replace(":5173", ":5000");
+      return origin;
+    }
+    return "";
+  }, []);
 
   const initialFetchRef = useRef(false);
   const searchDebounceRef = useRef<number | null>(null);
@@ -271,7 +279,7 @@ export default function Users() {
             const res = await fetch(`/api/profile/${u.id_user}/avatar`);
             if (!res.ok) return [u.id_user, null] as const;
             const data = await res.json();
-            const url = data?.url ? `${data.url}` : null;
+            const url = data?.url ? `${baseUrl}${data.url}` : null;
             return [u.id_user, url] as const;
           } catch {
             return [u.id_user, null] as const;

@@ -12,6 +12,7 @@ import logging
 import json
 from math import radians, sin, cos, sqrt, atan2
 import numpy as np
+import uuid
 from sentence_transformers import SentenceTransformer
 EMBEDDING_MODEL_NAME = "intfloat/multilingual-e5-base"
 model = SentenceTransformer(EMBEDDING_MODEL_NAME)
@@ -319,22 +320,89 @@ def find_best_matches_for_user(
         return results[:top_n]
 
 
-# Filesystem storage for avatars (no DB)
+# Media storage for avatars (assets/img + DB metadata)
 BASE_DIR = os.path.dirname(__file__)
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-AVATARS_DIR = os.path.join(UPLOAD_DIR, "avatars")
+ASSETS_IMG_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "assets", "img"))
+AVATARS_DIR = os.path.join(ASSETS_IMG_DIR, "avatars")
+LEGACY_AVATARS_DIR = os.path.join(BASE_DIR, "uploads", "avatars")
 os.makedirs(AVATARS_DIR, exist_ok=True)
 ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
-def _avatar_path_for(user_id: int, ext: str):
-    return os.path.join(AVATARS_DIR, f"user_{user_id}{ext}")
+def _avatar_disk_path(file_uid: str, ext: str) -> str:
+    return os.path.join(AVATARS_DIR, f"{file_uid}{ext}")
 
-def _find_existing_avatar(user_id: int):
+def _legacy_avatar_path_for(user_id: int, ext: str):
+    return os.path.join(LEGACY_AVATARS_DIR, f"user_{user_id}{ext}")
+
+def _find_legacy_avatar(user_id: int):
     for ext in ALLOWED_IMAGE_EXTS:
-        path = _avatar_path_for(user_id, ext)
+        path = _legacy_avatar_path_for(user_id, ext)
         if os.path.exists(path):
             return path, ext
     return None, None
+
+def _delete_avatar_records(conn, user_id: int):
+    """
+    Remove DB rows + files for a user's avatar. Keeps only media_files entries in sync.
+    """
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT file_uid, file_ext
+            FROM media_files
+            WHERE owner_type = 'user' AND owner_id = %s AND purpose = 'avatar'
+            """,
+            (user_id,),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            try:
+                os.remove(_avatar_disk_path(row["file_uid"], row["file_ext"]))
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                logging.warning("Avatar file cleanup failed: %s", exc)
+        cur.execute(
+            """
+            DELETE FROM media_files
+            WHERE owner_type = 'user' AND owner_id = %s AND purpose = 'avatar'
+            """,
+            (user_id,),
+        )
+    finally:
+        cur.close()
+
+def _find_avatar_meta(conn, user_id: int):
+    """
+    Load avatar metadata (DB) or fall back to legacy file if DB is empty.
+    """
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT file_uid, file_ext, storage_path
+            FROM media_files
+            WHERE owner_type = 'user' AND owner_id = %s AND purpose = 'avatar'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+        row = cur.fetchone()
+    finally:
+        cur.close()
+
+    if row:
+        return row
+
+    # Legacy fallback: look for old files under uploads/avatars
+    path, ext = _find_legacy_avatar(user_id)
+    if path and ext:
+        legacy_rel = f"/uploads/avatars/user_{user_id}{ext}"
+        return {"file_uid": f"legacy-{user_id}", "file_ext": ext, "storage_path": legacy_rel}
+
+    return None
 
 # 🔒 Validácia hesla
 def validate_password(password):
@@ -1625,50 +1693,81 @@ def _validate_profile_payload(data: dict):
 
     return True, ""
 
-# Avatar (no DB) endpoints
+# Avatar endpoints (media_files + assets/img/avatars)
 @app.post("/api/profile/<int:user_id>/avatar")
 def upload_profile_avatar(user_id: int):
     file = request.files.get("file")
     if not file or not file.filename:
-        return jsonify({"error": "Súbor nebol dodaný."}), 400
+        return jsonify({"error": "S?bor nebol dodan?."}), 400
 
     filename = secure_filename(file.filename)
     _, ext = os.path.splitext(filename)
     ext = ext.lower()
     if ext not in ALLOWED_IMAGE_EXTS:
-        return jsonify({"error": "Nepodporovaný formát. Povolené: jpg, jpeg, png, gif, webp"}), 400
+        return jsonify({"error": "Nepodporovan? form?t. Povolen?: jpg, jpeg, png, gif, webp"}), 400
 
-    for e in ALLOWED_IMAGE_EXTS:
-        old = _avatar_path_for(user_id, e)
-        try:
-            if os.path.exists(old):
-                os.remove(old)
-        except Exception:
-            pass
-
-    path = _avatar_path_for(user_id, ext)
+    file_uid = str(uuid.uuid4())
+    path = _avatar_disk_path(file_uid, ext)
     try:
         file.save(path)
     except Exception as e:
         return jsonify({"error": f"Ukladanie zlyhalo: {str(e)}"}), 500
 
-    url = f"/uploads/avatars/user_{user_id}{ext}"
-    return jsonify({"url": url}), 201
+    size_bytes = os.path.getsize(path)
+    storage_path = f"/assets/img/avatars/{file_uid}{ext}"
+
+    conn = get_conn()
+    cur = None
+    try:
+        _delete_avatar_records(conn, user_id)  # dr??me jeden avatar
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO media_files
+              (owner_type, owner_id, purpose, sort_order, file_uid, file_name, file_ext, mime_type, size_bytes, storage_path)
+            VALUES
+              ('user', %s, 'avatar', 0, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                user_id,
+                file_uid,
+                filename,
+                ext,
+                file.mimetype or None,
+                size_bytes,
+                storage_path,
+            ),
+        )
+        conn.commit()
+    except Exception as exc:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        return jsonify({"error": f"Ukladanie zlyhalo: {exc}"}), 500
+    finally:
+        if cur:
+            cur.close()
+
+    return jsonify({"url": storage_path, "uid": file_uid}), 201
 
 
 @app.get("/api/profile/<int:user_id>/avatar")
 def get_profile_avatar_meta(user_id: int):
-    path, ext = _find_existing_avatar(user_id)
-    if not path:
-        return jsonify({"error": "Avatar nenájdený"}), 404
-    url = f"/uploads/avatars/user_{user_id}{ext}"
-    return jsonify({"url": url}), 200
+    conn = get_conn()
+    try:
+        meta = _find_avatar_meta(conn, user_id)
+        if not meta:
+            return jsonify({"error": "Avatar nen?jden?"}), 404
+        return jsonify({"url": meta["storage_path"], "uid": meta["file_uid"]}), 200
+    finally:
+        conn.close()
 
 
-@app.get("/uploads/avatars/<path:filename>")
+@app.get("/assets/img/avatars/<path:filename>")
 def serve_avatar_file(filename: str):
     return send_from_directory(AVATARS_DIR, filename, as_attachment=False)
-    
+
 
 @app.get("/api/profile/<int:user_id>")
 def get_profile(user_id: int):

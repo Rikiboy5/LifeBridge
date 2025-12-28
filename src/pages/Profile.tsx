@@ -130,8 +130,16 @@ export default function Profile() {
   const [cityInputValue, setCityInputValue] = useState("");
   const [cityValidated, setCityValidated] = useState(false);
 
-  const baseUrl =
-    (import.meta as any).env?.VITE_API_URL ?? "";
+  const baseUrl = useMemo(() => {
+    const env = (import.meta as any).env?.VITE_API_URL ?? "";
+    if (env) return env.replace(/\/$/, "");
+    if (typeof window !== "undefined") {
+      const origin = window.location.origin;
+      if (origin.includes(":5173")) return origin.replace(":5173", ":5000");
+      return origin;
+    }
+    return "";
+  }, []);
 
   const currentUserId = useMemo<number | null>(() => {
     try {
@@ -276,6 +284,9 @@ export default function Profile() {
     }
   }, [viewedUserId]);
 
+  const toAbsolute = (url?: string | null) =>
+    url ? `${baseUrl}${url}` : null;
+
   useEffect(() => {
     if (!viewedUserId) return;
     (async () => {
@@ -288,7 +299,7 @@ export default function Profile() {
           return;
         }
         const data = await res.json();
-        if (data?.url) setAvatarSrc(`${data.url}`);
+        setAvatarSrc(toAbsolute(data?.url));
       } catch {
         setAvatarSrc(null);
       }
@@ -882,7 +893,7 @@ export default function Profile() {
                               data?.error || "Upload zlyhal"
                             );
                           if (data?.url)
-                            setAvatarSrc(`${data.url}`);
+                            setAvatarSrc(toAbsolute(data.url));
                         } catch (err) {
                           alert("Nepodarilo sa nahrať avatar.");
                         }
