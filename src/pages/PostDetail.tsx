@@ -51,6 +51,14 @@ interface AuthorProfile {
   created_at?: string;
 }
 
+interface PostImage {
+  uid: string;
+  url: string;
+  storage_path?: string;
+  sort_order?: number;
+  file_name?: string;
+}
+
 const categoryImageMap: Record<string, string> = {
   dobrovolnictvo: dobrovolnictvoImg,
   vzdelavanie: vzdelavanieImg,
@@ -94,10 +102,12 @@ export default function PostDetail() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [extraImages, setExtraImages] = useState<string[]>([]);
+  const [postImages, setPostImages] = useState<PostImage[]>([]);
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadingExtra, setUploadingExtra] = useState(false);
   const [formTitle, setFormTitle] = useState("");
   const [formCategory, setFormCategory] = useState("");
   const [formImage, setFormImage] = useState<string | null>(null);
@@ -114,21 +124,34 @@ export default function PostDetail() {
     if (!id) return;
     setLoading(true);
     setError(null);
-    fetch(`/api/posts/${id}`)
-      .then(async (res) => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/posts/${id}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Nepodarilo sa nacitat prispevok.");
-        return data as Post;
-      })
-      .then((data) => {
         setPost(data);
         setFormTitle(data.title);
         setFormCategory(data.category);
         setFormImage(data.image ?? null);
         setFormDescription(data.description);
-      })
-      .catch((e) => setError(e.message || "Nepodarilo sa nacitat prispevok."))
-      .finally(() => setLoading(false));
+
+        const imagesRes = await fetch(`/api/posts/${data.id_post}/images`);
+        if (imagesRes.ok) {
+          const imgs = (await imagesRes.json()) as PostImage[];
+          setPostImages(imgs);
+          if (!data.image && imgs.length > 0) {
+            setFormImage(imgs[0].url);
+            setPost((prev) => (prev ? { ...prev, image: imgs[0].url } : prev));
+          }
+        } else {
+          setPostImages([]);
+        }
+      } catch (e: any) {
+        setError(e.message || "Nepodarilo sa nacitat prispevok.");
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [id]);
 
   useEffect(() => {
@@ -171,14 +194,32 @@ export default function PostDetail() {
     return currentUser.role === "admin" || isOwner;
   }, [currentUser, post]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!post) return;
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setFormImage(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    setUploadingImage(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/posts/${post.id_post}/image`, {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Nepodarilo sa nahrať obrázok.");
+      const url = data.url || null;
+      setFormImage(url);
+      setPost((prev) => (prev ? { ...prev, image: url } : prev));
+      setPostImages((prev) => {
+        const next = [...prev, ...(data.uid ? [{ uid: data.uid, url, storage_path: data.storage_path, sort_order: data.sort_order }] : [])];
+        return next.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      });
+    } catch (err: any) {
+      alert(err.message || "Nepodarilo sa nahrať obrázok.");
+    } finally {
+      setUploadingImage(false);
+    }
   };
 
   const handleSave = async () => {
@@ -224,23 +265,74 @@ export default function PostDetail() {
     setFormDescription(post.description);
   };
 
-  const handleExtraImagesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleExtraImagesChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!post) return;
     const files = Array.from(e.target.files || []);
-    if (!files.length) {
-      setExtraImages([]);
-      return;
+    if (!files.length) return;
+    setUploadingExtra(true);
+    try {
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch(`/api/posts/${post.id_post}/image`, {
+          method: "POST",
+          body: fd,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Nepodarilo sa nahrať obrázok.");
+      }
+      const refresh = await fetch(`/api/posts/${post.id_post}/images`);
+      if (refresh.ok) {
+        const imgsRaw = (await refresh.json()) as any[];
+        const imgs = imgsRaw.map((i) => ({
+          uid: i.uid || i.file_uid,
+          url: i.url,
+          storage_path: i.storage_path,
+          sort_order: i.sort_order,
+          file_name: i.file_name,
+        })) as PostImage[];
+        setPostImages(imgs);
+      }
+    } catch (err: any) {
+      alert(err.message || "Nepodarilo sa nahrať obrázky.");
+    } finally {
+      setUploadingExtra(false);
+      e.target.value = "";
     }
-    Promise.all(
-      files.map(
-        (file) =>
-          new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve((reader.result as string) || "");
-            reader.readAsDataURL(file);
-          })
-      )
-    ).then((images) => setExtraImages(images.filter(Boolean)));
   };
+
+  const handleDeleteImage = async (uid: string) => {
+    if (!post) return;
+    try {
+      const res = await fetch(`/api/posts/${post.id_post}/images/${uid}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Nepodarilo sa odstrániť obrázok.");
+      const refresh = await fetch(`/api/posts/${post.id_post}/images`);
+      if (refresh.ok) {
+        const imgs = ((await refresh.json()) as any[]).map((i) => ({
+          uid: i.uid || i.file_uid,
+          url: i.url,
+          storage_path: i.storage_path,
+          sort_order: i.sort_order,
+          file_name: i.file_name,
+        })) as PostImage[];
+        setPostImages(imgs);
+        if (imgs.length > 0) {
+          setFormImage((prev) => prev || imgs[0].url);
+          setPost((prev) => (prev ? { ...prev, image: prev.image || imgs[0].url } : prev));
+        } else {
+          setFormImage(null);
+          setPost((prev) => (prev ? { ...prev, image: null } : prev));
+        }
+      }
+    } catch (err: any) {
+      alert(err.message || "Nepodarilo sa odstrániť obrázok.");
+    }
+  };
+
+  const primaryImage = editing
+    ? formImage || postImages[0]?.url || resolveImage(post)
+    : postImages[0]?.url || resolveImage(post);
 
   if (loading) {
     return (
@@ -286,7 +378,7 @@ export default function PostDetail() {
           <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)]">
             <div className="bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-4">
               <img
-                src={editing ? formImage || resolveImage(post) : resolveImage(post)}
+                src={primaryImage}
                 alt={post.title}
                 className="max-h-64 w-full object-contain bg-white rounded-xl shadow-inner"
               />
@@ -382,30 +474,40 @@ export default function PostDetail() {
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Dalsie obrazky</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Len ukazka UI, obrazky sa zatial neukladaju.</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Nahraj viac obrazkov k prispevku.</p>
             </div>
-            <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm cursor-pointer hover:bg-indigo-700 transition">
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={handleExtraImagesChange}
-              />
-              Pridat obrazky
-            </label>
+            {canEdit && (
+              <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm cursor-pointer hover:bg-indigo-700 transition">
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handleExtraImagesChange}
+                />
+                {uploadingExtra ? "Nahravam..." : "Pridat obrazky"}
+              </label>
+            )}
           </div>
 
-          {extraImages.length === 0 ? (
+          {postImages.length === 0 ? (
             <p className="text-sm text-gray-500 dark:text-gray-400">Zatial ziadne pridane obrazky.</p>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {extraImages.map((src, idx) => (
+              {postImages.map((img) => (
                 <div
-                  key={idx}
-                  className="aspect-square rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-center"
+                  key={img.uid}
+                  className="relative group aspect-square rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-center"
                 >
-                  <img src={src} alt={`Nahraty obrazok ${idx + 1}`} className="w-full h-full object-cover" />
+                  <img src={img.url} alt={img.file_name || "Obrazok"} className="w-full h-full object-cover" />
+                  {canEdit && (
+                    <button
+                      onClick={() => handleDeleteImage(img.uid)}
+                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition bg-black/60 text-white text-xs px-2 py-1 rounded"
+                    >
+                      Zmazat
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

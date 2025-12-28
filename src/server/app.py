@@ -443,6 +443,58 @@ def _delete_post_images(conn, post_id: int):
         cur.close()
 
 
+def _delete_post_image_by_uid(conn, post_id: int, file_uid: str):
+    """
+    Remove a single image by uid for given post.
+    """
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT file_uid, file_ext, storage_path
+            FROM media_files
+            WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image' AND file_uid = %s
+            """,
+            (post_id, file_uid),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+        try:
+            os.remove(_post_image_disk_path(row["file_uid"], row["file_ext"]))
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            logging.warning("Post image cleanup failed: %s", exc)
+        cur.execute(
+            """
+            DELETE FROM media_files
+            WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image' AND file_uid = %s
+            """,
+            (post_id, file_uid),
+        )
+        return True
+    finally:
+        cur.close()
+
+
+def _next_post_image_sort(conn, post_id: int) -> int:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT COALESCE(MAX(sort_order) + 1, 0) AS nxt
+            FROM media_files
+            WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image'
+            """,
+            (post_id,),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    finally:
+        cur.close()
+
+
 def _make_abs(url: str) -> str:
     """
     Prefix relative /path with current host so frontend that uses post.image directly bude mať plnú URL.
@@ -1945,17 +1997,18 @@ def upload_post_image(post_id: int):
 
     cur = None
     try:
-        _delete_post_images(conn, post_id)  # držíme jeden hlavný obrázok
+        sort_order = _next_post_image_sort(conn, post_id)
         cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO media_files
               (owner_type, owner_id, purpose, sort_order, file_uid, file_name, file_ext, mime_type, size_bytes, storage_path)
             VALUES
-              ('post', %s, 'post_image', 0, %s, %s, %s, %s, %s, %s)
+              ('post', %s, 'post_image', %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 post_id,
+                sort_order,
                 file_uid,
                 filename,
                 ext,
@@ -1964,7 +2017,8 @@ def upload_post_image(post_id: int):
                 storage_path,
             ),
         )
-        cur.execute("UPDATE posts SET image = %s WHERE id_post = %s", (storage_url, post_id))
+        # nastavíme hlavný obrázok len ak ešte nie je
+        cur.execute("UPDATE posts SET image = COALESCE(image, %s) WHERE id_post = %s", (storage_url, post_id))
         conn.commit()
     except Exception as exc:
         try:
@@ -1976,7 +2030,7 @@ def upload_post_image(post_id: int):
         if cur:
             cur.close()
 
-    return jsonify({"url": storage_url, "uid": file_uid, "storage_path": storage_path}), 201
+    return jsonify({"url": storage_url, "uid": file_uid, "storage_path": storage_path, "sort_order": sort_order}), 201
 
 
 @app.get("/api/posts/<int:post_id>/image")
@@ -2007,6 +2061,59 @@ def get_post_image_meta(post_id: int):
         return jsonify({"error": "Obrázok pre príspevok neexistuje."}), 404
     finally:
         cur.close()
+        conn.close()
+
+
+@app.get("/api/posts/<int:post_id>/images")
+def list_post_images(post_id: int):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT file_uid AS uid, file_uid, storage_path, sort_order, file_name, mime_type
+            FROM media_files
+            WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image'
+            ORDER BY sort_order ASC, created_at ASC
+            """,
+            (post_id,),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            if row.get("storage_path"):
+                row["url"] = _make_abs(row["storage_path"])
+        return jsonify(rows), 200
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.delete("/api/posts/<int:post_id>/images/<string:file_uid>")
+def delete_post_image(post_id: int, file_uid: str):
+    conn = get_conn()
+    try:
+        existed = _delete_post_image_by_uid(conn, post_id, file_uid)
+        if not existed:
+            return jsonify({"error": "Obrázok neexistuje."}), 404
+
+        # ak bol hlavný, nastavíme ďalší ako image
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT storage_path
+            FROM media_files
+            WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image'
+            ORDER BY sort_order ASC, created_at ASC
+            LIMIT 1
+            """,
+            (post_id,),
+        )
+        row = cur.fetchone()
+        next_image = _make_abs(row["storage_path"]) if row and row.get("storage_path") else None
+        cur.execute("UPDATE posts SET image = %s WHERE id_post = %s", (next_image, post_id))
+        conn.commit()
+        return jsonify({"success": True, "next_image": next_image}), 200
+    finally:
         conn.close()
 
 
