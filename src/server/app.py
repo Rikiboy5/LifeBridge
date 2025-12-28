@@ -5,6 +5,7 @@ from flask_bcrypt import Bcrypt
 import mysql.connector.pooling
 import os
 import re
+import base64
 from datetime import datetime
 from werkzeug.utils import secure_filename
 from contextlib import contextmanager
@@ -324,12 +325,17 @@ def find_best_matches_for_user(
 BASE_DIR = os.path.dirname(__file__)
 ASSETS_IMG_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "assets", "img"))
 AVATARS_DIR = os.path.join(ASSETS_IMG_DIR, "avatars")
+POST_IMAGES_DIR = os.path.join(ASSETS_IMG_DIR, "posts")
 LEGACY_AVATARS_DIR = os.path.join(BASE_DIR, "uploads", "avatars")
 os.makedirs(AVATARS_DIR, exist_ok=True)
+os.makedirs(POST_IMAGES_DIR, exist_ok=True)
 ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 def _avatar_disk_path(file_uid: str, ext: str) -> str:
     return os.path.join(AVATARS_DIR, f"{file_uid}{ext}")
+
+def _post_image_disk_path(file_uid: str, ext: str) -> str:
+    return os.path.join(POST_IMAGES_DIR, f"{file_uid}{ext}")
 
 def _legacy_avatar_path_for(user_id: int, ext: str):
     return os.path.join(LEGACY_AVATARS_DIR, f"user_{user_id}{ext}")
@@ -403,6 +409,113 @@ def _find_avatar_meta(conn, user_id: int):
         return {"file_uid": f"legacy-{user_id}", "file_ext": ext, "storage_path": legacy_rel}
 
     return None
+
+def _delete_post_images(conn, post_id: int):
+    """
+    Remove DB rows + files for a post's images (current implementation keeps one).
+    """
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT file_uid, file_ext
+            FROM media_files
+            WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image'
+            """,
+            (post_id,),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            try:
+                os.remove(_post_image_disk_path(row["file_uid"], row["file_ext"]))
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                logging.warning("Post image cleanup failed: %s", exc)
+        cur.execute(
+            """
+            DELETE FROM media_files
+            WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image'
+            """,
+            (post_id,),
+        )
+    finally:
+        cur.close()
+
+
+def _make_abs(url: str) -> str:
+    """
+    Prefix relative /path with current host so frontend that uses post.image directly bude mať plnú URL.
+    """
+    if not url:
+        return url
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    base = (request.host_url or "").rstrip("/")
+    return f"{base}{url}"
+
+
+def _save_post_image_from_data_url(conn, post_id: int, data_url: str):
+    """
+    Decode a data:image/...;base64 payload, save to disk, insert into media_files and posts.image.
+    Returns storage_path or None.
+    """
+    if not data_url or not data_url.startswith("data:image"):
+        return None
+
+    match = re.match(r"data:image/(png|jpeg|jpg|gif|webp);base64,(.+)", data_url, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+
+    ext_raw, b64data = match.groups()
+    ext = "." + ext_raw.lower().replace("jpeg", "jpg")
+    if ext not in ALLOWED_IMAGE_EXTS:
+        return None
+
+    try:
+        blob = base64.b64decode(b64data)
+    except Exception as exc:
+        logging.warning("Post image base64 decode failed: %s", exc)
+        return None
+
+    file_uid = str(uuid.uuid4())
+    path = _post_image_disk_path(file_uid, ext)
+    try:
+        with open(path, "wb") as f:
+            f.write(blob)
+    except Exception as exc:
+        logging.warning("Post image save failed: %s", exc)
+        return None
+
+    size_bytes = os.path.getsize(path)
+    storage_path = f"/assets/img/posts/{file_uid}{ext}"
+    storage_url = _make_abs(storage_path)
+    cur = conn.cursor()
+    try:
+        _delete_post_images(conn, post_id)
+        cur.execute(
+            """
+            INSERT INTO media_files
+              (owner_type, owner_id, purpose, sort_order, file_uid, file_name, file_ext, mime_type, size_bytes, storage_path)
+            VALUES
+              ('post', %s, 'post_image', 0, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                post_id,
+                file_uid,
+                f"post_{post_id}{ext}",
+                ext,
+                f"image/{ext.strip('.')}",
+                size_bytes,
+                storage_path,
+            ),
+        )
+        cur.execute("UPDATE posts SET image = %s WHERE id_post = %s", (storage_url, post_id))
+        conn.commit()
+    finally:
+        cur.close()
+
+    return storage_url
 
 # 🔒 Validácia hesla
 def validate_password(password):
@@ -1510,6 +1623,9 @@ def get_posts():
             """, params + [page_size, offset])
 
         rows = cur.fetchall()
+        for item in rows:
+            if item.get("image"):
+                item["image"] = _make_abs(item["image"])
 
         if not q and not category_values and not role_filter and not author_id:
             return jsonify(rows), 200
@@ -1553,6 +1669,8 @@ def get_post_detail(id_post: int):
         row = cur.fetchone()
         if not row:
             return jsonify({"error": "Prispevok neexistuje."}), 404
+        if row.get("image"):
+            row["image"] = _make_abs(row["image"])
         return jsonify(row), 200
     except Exception as e:
         return jsonify({"error": f"Chyba pri nacitani prispevku: {str(e)}"}), 500
@@ -1578,9 +1696,12 @@ def create_post():
         cur.execute("""
             INSERT INTO posts (title, description, category, image, user_id)
             VALUES (%s, %s, %s, %s, %s)
-        """, (title, description, category, image, user_id))
+        """, (title, description, category, None, user_id))
         new_id = cur.lastrowid
         conn.commit()
+
+        if image:
+            _save_post_image_from_data_url(conn, new_id, image)
 
         cur = conn.cursor(dictionary=True)
         cur.execute("""
@@ -1591,6 +1712,8 @@ def create_post():
             WHERE p.id_post = %s
         """, (new_id,))
         row = cur.fetchone()
+        if row and row.get("image"):
+            row["image"] = _make_abs(row["image"])
         return jsonify(row), 201
     except Exception as e:
         conn.rollback()
@@ -1623,7 +1746,21 @@ def update_post(id_post):
         if category is not None:
             sets.append("category = %s"); params.append(category)
         if image is not None:
-            sets.append("image = %s"); params.append(image)
+            # Ak klient pošle data URL -> uložíme ako súbor + media_files
+            if isinstance(image, str) and image.startswith("data:image"):
+                stored = _save_post_image_from_data_url(conn, id_post, image)
+                if not stored:
+                    return jsonify({"error": "Nepodarilo sa uložiť obrázok."}), 400
+                sets.append("image = %s"); params.append(stored)
+            else:
+                # prázdny string => vymazanie obrázka
+                if not image:
+                    _delete_post_images(conn, id_post)
+                    sets.append("image = %s"); params.append(None)
+                else:
+                    # URL alebo cesta; zároveň čistíme staré záznamy, aby sedel media_files
+                    _delete_post_images(conn, id_post)
+                    sets.append("image = %s"); params.append(_make_abs(image))
 
         if not sets:
             return jsonify({"error": "Nie je čo aktualizovať."}), 400
@@ -1631,7 +1768,10 @@ def update_post(id_post):
         params.append(id_post)
         cur.execute(f"UPDATE posts SET {', '.join(sets)} WHERE id_post = %s", tuple(params))
         if cur.rowcount == 0:
-            return jsonify({"error": "Príspevok neexistuje."}), 404
+            # Ak sa nezmenili dáta, overíme, či príspevok existuje; ak áno, považujme za OK.
+            cur.execute("SELECT 1 FROM posts WHERE id_post = %s", (id_post,))
+            if not cur.fetchone():
+                return jsonify({"error": "Príspevok neexistuje."}), 404
         conn.commit()
         return jsonify({"success": True}), 200
     except Exception as e:
@@ -1647,6 +1787,7 @@ def delete_post(id_post):
     conn = get_conn()
     try:
         cur = conn.cursor()
+        _delete_post_images(conn, id_post)
         cur.execute("DELETE FROM posts WHERE id_post = %s", (id_post,))
         if cur.rowcount == 0:
             return jsonify({"error": "Príspevok neexistuje."}), 404
@@ -1767,6 +1908,111 @@ def get_profile_avatar_meta(user_id: int):
 @app.get("/assets/img/avatars/<path:filename>")
 def serve_avatar_file(filename: str):
     return send_from_directory(AVATARS_DIR, filename, as_attachment=False)
+
+
+# Post image endpoints (media_files + assets/img/posts)
+@app.post("/api/posts/<int:post_id>/image")
+def upload_post_image(post_id: int):
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "Súbor nebol dodaný."}), 400
+
+    filename = secure_filename(file.filename)
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower()
+    if ext not in ALLOWED_IMAGE_EXTS:
+        return jsonify({"error": "Nepodporovaný formát. Povolené: jpg, jpeg, png, gif, webp"}), 400
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM posts WHERE id_post = %s", (post_id,))
+        if not cur.fetchone():
+            return jsonify({"error": "Príspevok neexistuje."}), 404
+    finally:
+        cur.close()
+
+    file_uid = str(uuid.uuid4())
+    path = _post_image_disk_path(file_uid, ext)
+    try:
+        file.save(path)
+    except Exception as exc:
+        return jsonify({"error": f"Ukladanie zlyhalo: {exc}"}), 500
+
+    size_bytes = os.path.getsize(path)
+    storage_path = f"/assets/img/posts/{file_uid}{ext}"
+    storage_url = _make_abs(storage_path)
+
+    cur = None
+    try:
+        _delete_post_images(conn, post_id)  # držíme jeden hlavný obrázok
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO media_files
+              (owner_type, owner_id, purpose, sort_order, file_uid, file_name, file_ext, mime_type, size_bytes, storage_path)
+            VALUES
+              ('post', %s, 'post_image', 0, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                post_id,
+                file_uid,
+                filename,
+                ext,
+                file.mimetype or None,
+                size_bytes,
+                storage_path,
+            ),
+        )
+        cur.execute("UPDATE posts SET image = %s WHERE id_post = %s", (storage_url, post_id))
+        conn.commit()
+    except Exception as exc:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        return jsonify({"error": f"Ukladanie zlyhalo: {exc}"}), 500
+    finally:
+        if cur:
+            cur.close()
+
+    return jsonify({"url": storage_url, "uid": file_uid, "storage_path": storage_path}), 201
+
+
+@app.get("/api/posts/<int:post_id>/image")
+def get_post_image_meta(post_id: int):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT file_uid, file_ext, storage_path
+            FROM media_files
+            WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (post_id,),
+        )
+        row = cur.fetchone()
+
+        if row:
+            return jsonify({"url": _make_abs(row["storage_path"]), "uid": row["file_uid"], "storage_path": row["storage_path"]}), 200
+
+        cur.execute("SELECT image FROM posts WHERE id_post = %s", (post_id,))
+        fallback = cur.fetchone()
+        if fallback and fallback[0]:
+            return jsonify({"url": _make_abs(fallback[0]), "uid": None}), 200
+
+        return jsonify({"error": "Obrázok pre príspevok neexistuje."}), 404
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/assets/img/posts/<path:filename>")
+def serve_post_image(filename: str):
+    return send_from_directory(POST_IMAGES_DIR, filename, as_attachment=False)
 
 
 @app.get("/api/profile/<int:user_id>")
