@@ -327,10 +327,12 @@ ASSETS_IMG_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "assets", "img"))
 AVATARS_DIR = os.path.join(ASSETS_IMG_DIR, "avatars")
 POST_IMAGES_DIR = os.path.join(ASSETS_IMG_DIR, "posts")
 ACTIVITY_IMAGES_DIR = os.path.join(ASSETS_IMG_DIR, "activities")
+ARTICLE_IMAGES_DIR = os.path.join(ASSETS_IMG_DIR, "articles")
 LEGACY_AVATARS_DIR = os.path.join(BASE_DIR, "uploads", "avatars")
 os.makedirs(AVATARS_DIR, exist_ok=True)
 os.makedirs(POST_IMAGES_DIR, exist_ok=True)
 os.makedirs(ACTIVITY_IMAGES_DIR, exist_ok=True)
+os.makedirs(ARTICLE_IMAGES_DIR, exist_ok=True)
 ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 def _avatar_disk_path(file_uid: str, ext: str) -> str:
@@ -341,6 +343,9 @@ def _post_image_disk_path(file_uid: str, ext: str) -> str:
 
 def _activity_image_disk_path(file_uid: str, ext: str) -> str:
     return os.path.join(ACTIVITY_IMAGES_DIR, f"{file_uid}{ext}")
+
+def _article_image_disk_path(file_uid: str, ext: str) -> str:
+    return os.path.join(ARTICLE_IMAGES_DIR, f"{file_uid}{ext}")
 
 def _legacy_avatar_path_for(user_id: int, ext: str):
     return os.path.join(LEGACY_AVATARS_DIR, f"user_{user_id}{ext}")
@@ -672,6 +677,36 @@ def _delete_activity_image(conn, activity_id: int):
         cur.close()
 
 
+def _delete_article_image(conn, article_id: int):
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT file_uid, file_ext
+            FROM media_files
+            WHERE owner_type = 'article' AND owner_id = %s AND purpose = 'attachment'
+            """,
+            (article_id,),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            try:
+                os.remove(_article_image_disk_path(row["file_uid"], row["file_ext"]))
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                logging.warning("Article image cleanup failed: %s", exc)
+        cur.execute(
+            """
+            DELETE FROM media_files
+            WHERE owner_type = 'article' AND owner_id = %s AND purpose = 'attachment'
+            """,
+            (article_id,),
+        )
+    finally:
+        cur.close()
+
+
 def _save_activity_image_from_data_url(conn, activity_id: int, data_url: str):
     """
     Decode data:image payload, persist to disk + media_files, update activities.image_url.
@@ -750,6 +785,76 @@ def _save_post_image_from_data_url(conn, post_id: int, data_url: str):
     """
     if not data_url or not data_url.startswith("data:image"):
         return None
+
+
+def _save_article_image_from_data_url(conn, article_id: int, data_url: str):
+    """
+    Decode data:image payload for article, save to disk + media_files, update articles.image_url.
+    """
+    if not data_url or not isinstance(data_url, str) or not data_url.startswith("data:image"):
+        return None
+
+    match = re.match(r"data:image/(png|jpeg|jpg|gif|webp);base64,(.+)", data_url, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+
+    ext_raw, b64data = match.groups()
+    ext = "." + ext_raw.lower().replace("jpeg", "jpg")
+    if ext not in ALLOWED_IMAGE_EXTS:
+        return None
+
+    try:
+        blob = base64.b64decode(b64data)
+    except Exception as exc:
+        logging.warning("Article image base64 decode failed: %s", exc)
+        return None
+
+    file_uid = str(uuid.uuid4())
+    path = _article_image_disk_path(file_uid, ext)
+    try:
+        with open(path, "wb") as f:
+            f.write(blob)
+    except Exception as exc:
+        logging.warning("Article image save failed: %s", exc)
+        return None
+
+    size_bytes = os.path.getsize(path)
+    storage_path = f"/assets/img/articles/{file_uid}{ext}"
+    storage_url = _make_abs(storage_path)
+
+    _delete_article_image(conn, article_id)
+
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO media_files
+              (owner_type, owner_id, purpose, sort_order, file_uid, file_name, file_ext, mime_type, size_bytes, storage_path)
+            VALUES
+              ('article', %s, 'attachment', 0, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                article_id,
+                file_uid,
+                f"article_{article_id}{ext}",
+                ext,
+                f"image/{ext.strip('.')}",
+                size_bytes,
+                storage_path,
+            ),
+        )
+        cur.execute("UPDATE articles SET image_url = %s WHERE id_article = %s", (storage_url, article_id))
+        conn.commit()
+        return storage_url
+    except Exception as exc:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        logging.warning("Article image DB save failed: %s", exc)
+        return None
+    finally:
+        cur.close()
 
     match = re.match(r"data:image/(png|jpeg|jpg|gif|webp);base64,(.+)", data_url, re.IGNORECASE | re.DOTALL)
     if not match:
@@ -2342,6 +2447,10 @@ def serve_post_image(filename: str):
 def serve_activity_image(filename: str):
     return send_from_directory(ACTIVITY_IMAGES_DIR, filename, as_attachment=False)
 
+@app.get("/assets/img/articles/<path:filename>")
+def serve_article_image(filename: str):
+    return send_from_directory(ARTICLE_IMAGES_DIR, filename, as_attachment=False)
+
 
 @app.get("/api/profile/<int:user_id>")
 def get_profile(user_id: int):
@@ -3002,7 +3111,11 @@ def list_articles():
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT * FROM articles ORDER BY created_at DESC")
-        return jsonify(cur.fetchall())
+        rows = cur.fetchall()
+        for row in rows:
+            if row.get("image_url"):
+                row["image_url"] = _make_abs(row["image_url"])
+        return jsonify(rows)
     finally:
         conn.close()
 
@@ -3015,6 +3128,8 @@ def get_article(id_article):
         article = cur.fetchone()
         if not article:
             return jsonify({"error": "Article not found"}), 404
+        if article.get("image_url"):
+            article["image_url"] = _make_abs(article["image_url"])
         return jsonify(article)
     finally:
         conn.close()
@@ -3024,7 +3139,7 @@ def create_article():
     data = request.get_json()
     title = data.get("title")
     text = data.get("text")
-    image_url = data.get("image_url")
+    image = data.get("image") or data.get("image_url")
 
     if not title or not text:
         return jsonify({"error": "Title and text are required"}), 400
@@ -3035,13 +3150,90 @@ def create_article():
         cur.execute("""
             INSERT INTO articles (title, text, image_url)
             VALUES (%s, %s, %s)
-        """, (title, text, image_url))
+        """, (title, text, None))
         conn.commit()
 
         new_id = cur.lastrowid
-        return jsonify({"id_article": new_id}), 201
+        if image:
+            if isinstance(image, str) and image.startswith("data:image"):
+                stored = _save_article_image_from_data_url(conn, new_id, image)
+                if stored:
+                    image = stored
+            else:
+                image = _make_abs(str(image))
+                cur.execute("UPDATE articles SET image_url = %s WHERE id_article = %s", (image, new_id))
+                conn.commit()
+
+        return jsonify({"id_article": new_id, "image_url": _make_abs(image) if image else None}), 201
     finally:
         conn.close()
+
+@app.post("/api/articles/<int:article_id>/image")
+def upload_article_image(article_id: int):
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "Subor nebol dodany."}), 400
+
+    filename = secure_filename(file.filename)
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower()
+    if ext not in ALLOWED_IMAGE_EXTS:
+        return jsonify({"error": "Nepodporovany format. Povolené: jpg, jpeg, png, gif, webp"}), 400
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM articles WHERE id_article = %s", (article_id,))
+        if not cur.fetchone():
+            return jsonify({"error": "Article not found"}), 404
+    finally:
+        cur.close()
+
+    file_uid = str(uuid.uuid4())
+    path = _article_image_disk_path(file_uid, ext)
+    try:
+        file.save(path)
+    except Exception as exc:
+        return jsonify({"error": f"Ukladanie zlyhalo: {exc}"}), 500
+
+    size_bytes = os.path.getsize(path)
+    storage_path = f"/assets/img/articles/{file_uid}{ext}"
+    storage_url = _make_abs(storage_path)
+
+    cur = None
+    try:
+        cur = conn.cursor()
+        _delete_article_image(conn, article_id)
+        cur.execute(
+            """
+            INSERT INTO media_files
+              (owner_type, owner_id, purpose, sort_order, file_uid, file_name, file_ext, mime_type, size_bytes, storage_path)
+            VALUES
+              ('article', %s, 'attachment', 0, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                article_id,
+                file_uid,
+                filename,
+                ext,
+                file.mimetype or None,
+                size_bytes,
+                storage_path,
+            ),
+        )
+        cur.execute("UPDATE articles SET image_url = %s WHERE id_article = %s", (storage_url, article_id))
+        conn.commit()
+    except Exception as exc:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        return jsonify({"error": f"Ukladanie zlyhalo: {exc}"}), 500
+    finally:
+        if cur:
+            cur.close()
+
+    return jsonify({"url": storage_url, "uid": file_uid, "storage_path": storage_path}), 201
 
 
 # ==========================================
