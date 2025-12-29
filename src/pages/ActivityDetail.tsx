@@ -343,7 +343,7 @@ export default function ActivityDetail() {
             </div>
           ) : (
             <>
-              <p className="text-gray-700 dark:text-gray-300 leading-relaxed break-words whitespace-pre-line">
+              <p className="text-gray-700 dark:text-gray-300 leading-relaxed break-words break-all whitespace-pre-line">
                 {activity.description || "Bez popisu"}
               </p>
               <p className="text-sm text-gray-500">
