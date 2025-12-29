@@ -2692,6 +2692,30 @@ def create_activity():
         conn.close()
 
 
+@app.get("/api/activities/<int:activity_id>")
+def get_activity(activity_id: int):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT id_activity, title, description, image_url, capacity, attendees_count, lat, lng, user_id, created_at
+            FROM activities
+            WHERE id_activity = %s
+            """,
+            (activity_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Aktivita neexistuje."}), 404
+        if row.get("image_url"):
+            row["image_url"] = _make_abs(row["image_url"])
+        return jsonify(row), 200
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.post("/api/activities/<int:activity_id>/image")
 def upload_activity_image(activity_id: int):
     file = request.files.get("file")
@@ -2816,6 +2840,80 @@ def delete_activity_image(activity_id: int):
         logging.warning("Failed to delete activity image: %s", exc)
         return jsonify({"error": "Nepodarilo sa odstrániť obrázok."}), 500
     finally:
+        conn.close()
+
+
+@app.put("/api/activities/<int:activity_id>")
+def update_activity(activity_id: int):
+    data = request.get_json(force=True) or {}
+    title = data.get("title")
+    description = data.get("description")
+    capacity = data.get("capacity")
+    image = data.get("image") or data.get("image_url")
+    user_id = data.get("user_id")
+
+    if not user_id:
+        return jsonify({"error": "Chýba user_id."}), 400
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("SELECT user_id FROM activities WHERE id_activity = %s", (activity_id,))
+        owner_row = cur.fetchone()
+        if not owner_row:
+            return jsonify({"error": "Aktivita neexistuje."}), 404
+        if int(owner_row["user_id"]) != int(user_id):
+            return jsonify({"error": "Nemáš oprávnenie upraviť túto aktivitu."}), 403
+
+        sets = []
+        params: list = []
+
+        if title is not None:
+            if not str(title).strip():
+                return jsonify({"error": "Názov je povinný."}), 400
+            sets.append("title = %s"); params.append(title)
+
+        if description is not None:
+            sets.append("description = %s"); params.append(description)
+
+        if capacity is not None:
+            try:
+                capacity_int = int(capacity)
+            except Exception:
+                return jsonify({"error": "Kapacita musí byť číslo."}), 400
+            if capacity_int < 1:
+                return jsonify({"error": "Kapacita musí byť aspoň 1."}), 400
+            sets.append("capacity = %s"); params.append(capacity_int)
+
+        if image is not None:
+            # Handle image update/removal
+            if isinstance(image, str) and image.startswith("data:image"):
+                stored = _save_activity_image_from_data_url(conn, activity_id, image)
+                if not stored:
+                    return jsonify({"error": "Nepodarilo sa uložiť obrázok."}), 400
+                sets.append("image_url = %s"); params.append(stored)
+            elif not image:
+                _delete_activity_image(conn, activity_id)
+                sets.append("image_url = %s"); params.append(None)
+            else:
+                _delete_activity_image(conn, activity_id)
+                abs_url = _make_abs(str(image))
+                sets.append("image_url = %s"); params.append(abs_url)
+
+        if not sets:
+            return jsonify({"error": "Nie je čo aktualizovať."}), 400
+
+        params.append(activity_id)
+        cur.execute(f"UPDATE activities SET {', '.join(sets)} WHERE id_activity = %s", tuple(params))
+        conn.commit()
+
+        cur.execute("SELECT * FROM activities WHERE id_activity = %s", (activity_id,))
+        row = cur.fetchone()
+        if row and row.get("image_url"):
+            row["image_url"] = _make_abs(row["image_url"])
+        return jsonify(row), 200
+    finally:
+        cur.close()
         conn.close()
 
 
