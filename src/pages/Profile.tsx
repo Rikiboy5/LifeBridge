@@ -112,6 +112,7 @@ export default function Profile() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
   const [avatarSrc, setAvatarSrc] = useState<string | null>(null);
+  const avatarFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [form, setForm] = useState({
     meno: "",
@@ -873,32 +874,47 @@ export default function Profile() {
                       textClass="text-lg"
                       borderClass="border border-gray-300 dark:border-gray-600"
                     />
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={async (e) => {
-                        if (!profile || !canEditProfile) return;
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const fd = new FormData();
-                        fd.append("file", file);
-                        try {
-                          const res = await fetch(
+                    <div className="flex flex-col gap-2 items-start">
+                      <input
+                        ref={avatarFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={async (e) => {
+                          if (!profile || !canEditProfile) return;
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const fd = new FormData();
+                          fd.append("file", file);
+                          try {
+                            const res = await fetch(
                             `/api/profile/${profile.id_user}/avatar`,
                             { method: "POST", body: fd }
                           );
-                          const data = await res.json();
-                          if (!res.ok)
+                            const data = await res.json();
+                            if (!res.ok)
                             throw new Error(
                               data?.error || "Upload zlyhal"
                             );
-                          if (data?.url)
+                            if (data?.url)
                             setAvatarSrc(toAbsolute(data.url));
-                        } catch (err) {
-                          alert("Nepodarilo sa nahrať avatar.");
-                        }
-                      }}
-                    />
+                          } catch (err) {
+                            alert("Nepodarilo sa nahrať avatar.");
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="text-sm text-red-600 hover:underline"
+                        onClick={() => {
+                          setAvatarSrc(null);
+                          if (avatarFileInputRef.current) {
+                            avatarFileInputRef.current.value = "";
+                          }
+                        }}
+                      >
+                        Odstranit fotku (nastavit default)
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -1087,3 +1103,4 @@ export default function Profile() {
     </MainLayout>
   );
 }
+
