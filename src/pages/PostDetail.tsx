@@ -200,21 +200,14 @@ export default function PostDetail() {
     if (!file) return;
     setUploadingImage(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch(`/api/posts/${post.id_post}/image`, {
-        method: "POST",
-        body: fd,
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error || new Error("Nepodarilo sa nacitat obrazok."));
+        reader.readAsDataURL(file);
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Nepodarilo sa nahrať obrázok.");
-      const url = data.url || null;
-      setFormImage(url);
-      setPost((prev) => (prev ? { ...prev, image: url } : prev));
-      setPostImages((prev) => {
-        const next = [...prev, ...(data.uid ? [{ uid: data.uid, url, storage_path: data.storage_path, sort_order: data.sort_order }] : [])];
-        return next.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-      });
+      setFormImage(dataUrl); // uloží sa až po kliknutí na Uložiť
+      setPost((prev) => (prev ? { ...prev, image: dataUrl } : prev));
     } catch (err: any) {
       alert(err.message || "Nepodarilo sa nahrať obrázok.");
     } finally {

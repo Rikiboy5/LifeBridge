@@ -490,7 +490,131 @@ def _next_post_image_sort(conn, post_id: int) -> int:
             (post_id,),
         )
         row = cur.fetchone()
-        return int(row[0]) if row and row[0] is not None else 0
+        nxt = int(row[0]) if row and row[0] is not None else 0
+        return max(1, nxt)  # rezervujeme 0 pre hlavný obrázok
+    finally:
+        cur.close()
+
+
+def _insert_post_image_record(
+    conn,
+    post_id: int,
+    *,
+    file_uid: str,
+    filename: str,
+    ext: str,
+    mime_type: str | None,
+    size_bytes: int,
+    storage_path: str,
+    is_main: bool = False,
+):
+    """
+    Insert media_files row and update posts.image depending on main flag.
+    Keeps current main (sort_order 0) intact unless is_main=True is passed.
+    """
+    storage_url = _make_abs(storage_path)
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT file_uid
+            FROM media_files
+            WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image' AND sort_order = 0
+            LIMIT 1
+            """,
+            (post_id,),
+        )
+        existing_main = cur.fetchone()
+        has_main = bool(existing_main)
+        make_main = is_main or not has_main
+
+        if make_main and has_main:
+            cur.execute(
+                """
+                UPDATE media_files
+                SET sort_order = %s
+                WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image' AND file_uid = %s
+                """,
+                (_next_post_image_sort(conn, post_id), post_id, existing_main["file_uid"]),
+            )
+            sort_order = 0
+        elif make_main:
+            sort_order = 0
+        else:
+            sort_order = _next_post_image_sort(conn, post_id)
+
+        cur.execute(
+            """
+            INSERT INTO media_files
+              (owner_type, owner_id, purpose, sort_order, file_uid, file_name, file_ext, mime_type, size_bytes, storage_path)
+            VALUES
+              ('post', %s, 'post_image', %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                post_id,
+                sort_order,
+                file_uid,
+                filename,
+                ext,
+                mime_type,
+                size_bytes,
+                storage_path,
+            ),
+        )
+
+        if make_main:
+            cur.execute("UPDATE posts SET image = %s WHERE id_post = %s", (storage_url, post_id))
+        else:
+            cur.execute("UPDATE posts SET image = COALESCE(image, %s) WHERE id_post = %s", (storage_url, post_id))
+
+        conn.commit()
+        return storage_url, sort_order
+    finally:
+        cur.close()
+
+
+def _resequence_post_images(conn, post_id: int):
+    """
+    Normalize sort_order: main stays at 0 (if present), others start at 1. Does not auto-promote other images.
+    """
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT file_uid, storage_path, sort_order
+            FROM media_files
+            WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image'
+            ORDER BY sort_order ASC, created_at ASC
+            """,
+            (post_id,),
+        )
+        rows = cur.fetchall()
+        main_url = None
+        has_main = False
+        next_idx = 1
+        for row in rows:
+            if row.get("sort_order") == 0 and not has_main:
+                target = 0
+                has_main = True
+                if row.get("storage_path"):
+                    main_url = _make_abs(row["storage_path"])
+            else:
+                target = next_idx
+                next_idx += 1
+
+            if row.get("sort_order") != target:
+                cur.execute(
+                    """
+                    UPDATE media_files
+                    SET sort_order = %s
+                    WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image' AND file_uid = %s
+                    """,
+                    (target, post_id, row["file_uid"]),
+                )
+
+        cur.execute("UPDATE posts SET image = %s WHERE id_post = %s", (main_url, post_id))
+        conn.commit()
+        return main_url
     finally:
         cur.close()
 
@@ -541,33 +665,26 @@ def _save_post_image_from_data_url(conn, post_id: int, data_url: str):
 
     size_bytes = os.path.getsize(path)
     storage_path = f"/assets/img/posts/{file_uid}{ext}"
-    storage_url = _make_abs(storage_path)
-    cur = conn.cursor()
     try:
-        _delete_post_images(conn, post_id)
-        cur.execute(
-            """
-            INSERT INTO media_files
-              (owner_type, owner_id, purpose, sort_order, file_uid, file_name, file_ext, mime_type, size_bytes, storage_path)
-            VALUES
-              ('post', %s, 'post_image', 0, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                post_id,
-                file_uid,
-                f"post_{post_id}{ext}",
-                ext,
-                f"image/{ext.strip('.')}",
-                size_bytes,
-                storage_path,
-            ),
+        storage_url, _ = _insert_post_image_record(
+            conn,
+            post_id,
+            file_uid=file_uid,
+            filename=f"post_{post_id}{ext}",
+            ext=ext,
+            mime_type=f"image/{ext.strip('.')}",
+            size_bytes=size_bytes,
+            storage_path=storage_path,
+            is_main=True,
         )
-        cur.execute("UPDATE posts SET image = %s WHERE id_post = %s", (storage_url, post_id))
-        conn.commit()
-    finally:
-        cur.close()
-
-    return storage_url
+        return storage_url
+    except Exception as exc:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        logging.warning("Post image save failed: %s", exc)
+        return None
 
 # 🔒 Validácia hesla
 def validate_password(password):
@@ -1969,6 +2086,9 @@ def upload_post_image(post_id: int):
     if not file or not file.filename:
         return jsonify({"error": "Súbor nebol dodaný."}), 400
 
+    raw_main_flag = request.form.get("main") or request.args.get("main") or ""
+    is_main = str(raw_main_flag).lower() in {"1", "true", "yes", "on", "main"}
+
     filename = secure_filename(file.filename)
     _, ext = os.path.splitext(filename)
     ext = ext.lower()
@@ -1993,44 +2113,27 @@ def upload_post_image(post_id: int):
 
     size_bytes = os.path.getsize(path)
     storage_path = f"/assets/img/posts/{file_uid}{ext}"
-    storage_url = _make_abs(storage_path)
 
-    cur = None
     try:
-        sort_order = _next_post_image_sort(conn, post_id)
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO media_files
-              (owner_type, owner_id, purpose, sort_order, file_uid, file_name, file_ext, mime_type, size_bytes, storage_path)
-            VALUES
-              ('post', %s, 'post_image', %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                post_id,
-                sort_order,
-                file_uid,
-                filename,
-                ext,
-                file.mimetype or None,
-                size_bytes,
-                storage_path,
-            ),
+        storage_url, sort_order = _insert_post_image_record(
+            conn,
+            post_id,
+            file_uid=file_uid,
+            filename=filename,
+            ext=ext,
+            mime_type=file.mimetype or None,
+            size_bytes=size_bytes,
+            storage_path=storage_path,
+            is_main=is_main,
         )
-        # nastavíme hlavný obrázok len ak ešte nie je
-        cur.execute("UPDATE posts SET image = COALESCE(image, %s) WHERE id_post = %s", (storage_url, post_id))
-        conn.commit()
     except Exception as exc:
         try:
             os.remove(path)
         except Exception:
             pass
         return jsonify({"error": f"Ukladanie zlyhalo: {exc}"}), 500
-    finally:
-        if cur:
-            cur.close()
 
-    return jsonify({"url": storage_url, "uid": file_uid, "storage_path": storage_path, "sort_order": sort_order}), 201
+    return jsonify({"url": storage_url, "uid": file_uid, "storage_path": storage_path, "sort_order": sort_order, "is_main": is_main}), 201
 
 
 @app.get("/api/posts/<int:post_id>/image")
@@ -2043,7 +2146,7 @@ def get_post_image_meta(post_id: int):
             SELECT file_uid, file_ext, storage_path
             FROM media_files
             WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image'
-            ORDER BY created_at DESC
+            AND sort_order = 0
             LIMIT 1
             """,
             (post_id,),
@@ -2096,22 +2199,7 @@ def delete_post_image(post_id: int, file_uid: str):
         if not existed:
             return jsonify({"error": "Obrázok neexistuje."}), 404
 
-        # ak bol hlavný, nastavíme ďalší ako image
-        cur = conn.cursor(dictionary=True)
-        cur.execute(
-            """
-            SELECT storage_path
-            FROM media_files
-            WHERE owner_type = 'post' AND owner_id = %s AND purpose = 'post_image'
-            ORDER BY sort_order ASC, created_at ASC
-            LIMIT 1
-            """,
-            (post_id,),
-        )
-        row = cur.fetchone()
-        next_image = _make_abs(row["storage_path"]) if row and row.get("storage_path") else None
-        cur.execute("UPDATE posts SET image = %s WHERE id_post = %s", (next_image, post_id))
-        conn.commit()
+        next_image = _resequence_post_images(conn, post_id)
         return jsonify({"success": True, "next_image": next_image}), 200
     finally:
         conn.close()
