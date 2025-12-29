@@ -263,7 +263,9 @@ export default function Home() {
                       <div className="p-4 space-y-2 flex-1 flex flex-col justify-between">
                         <div className="space-y-2">
                           <h3 className="text-lg font-medium line-clamp-2">{a.title}</h3>
-                          <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{a.description || "Bez popisu"}</p>
+                          <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 break-words break-all">
+                            {a.description || "Bez popisu"}
+                          </p>
                         </div>
                         <p className="text-xs text-gray-500">Kapacita {a.attendees_count}/{a.capacity}</p>
                       </div>
@@ -402,7 +404,7 @@ export default function Home() {
                     <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
                       <div className="space-y-2">
                         <h3 className="text-lg font-semibold line-clamp-2">{a.title}</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3">
+                        <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3 break-words break-all">
                           {a.text || "Bez obsahu"}
                         </p>
                       </div>
