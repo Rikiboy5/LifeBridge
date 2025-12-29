@@ -3134,6 +3134,32 @@ def get_article(id_article):
     finally:
         conn.close()
 
+@app.delete("/api/activities/<int:activity_id>")
+def delete_activity_record(activity_id: int):
+    data = request.get_json(force=True) or {}
+    user_id = data.get("user_id")
+    if not user_id:
+        return jsonify({"error": "Chyba user_id."}), 400
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("SELECT user_id FROM activities WHERE id_activity = %s", (activity_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Aktivita neexistuje."}), 404
+        if int(row["user_id"]) != int(user_id):
+            return jsonify({"error": "Nemate opravnenie zmazat tuto aktivitu."}), 403
+
+        _delete_activity_image(conn, activity_id)
+        cur.execute("DELETE FROM activity_signups WHERE activity_id = %s", (activity_id,))
+        cur.execute("DELETE FROM activities WHERE id_activity = %s", (activity_id,))
+        conn.commit()
+        return jsonify({"success": True}), 200
+    finally:
+        cur.close()
+        conn.close()
+
 @app.post("/api/articles")
 def create_article():
     data = request.get_json()

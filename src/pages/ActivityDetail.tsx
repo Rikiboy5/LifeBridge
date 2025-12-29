@@ -214,6 +214,23 @@ export default function ActivityDetail() {
     }
   };
 
+  const handleDeleteActivity = async () => {
+    if (!activity || !currentUserId) return;
+    if (!window.confirm("Naozaj zmazat tuto aktivitu?")) return;
+    try {
+      const res = await fetch(`/api/activities/${activityId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: currentUserId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Mazanie zlyhalo.");
+      navigate("/activities");
+    } catch (err: any) {
+      alert(err.message || "Mazanie zlyhalo.");
+    }
+  };
+
   if (loading) {
     return (
       <MainLayout>
@@ -254,9 +271,14 @@ export default function ActivityDetail() {
           <div className="flex items-start justify-between gap-3">
             <h1 className="text-3xl font-bold break-words">{activity.title}</h1>
             {isOwner && (
-              <button onClick={() => setEditing((v) => !v)} className="text-sm text-blue-600 hover:text-blue-700">
-                {editing ? "Zrusit" : "Upravit"}
-              </button>
+              <div className="flex gap-2">
+                <button onClick={() => setEditing((v) => !v)} className="text-sm text-blue-600 hover:text-blue-700">
+                  {editing ? "Zrusit" : "Upravit"}
+                </button>
+                <button onClick={handleDeleteActivity} className="text-sm text-red-600 hover:text-red-700">
+                  Zmazat
+                </button>
+              </div>
             )}
           </div>
 
