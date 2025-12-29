@@ -2851,6 +2851,7 @@ def update_activity(activity_id: int):
     capacity = data.get("capacity")
     image = data.get("image") or data.get("image_url")
     user_id = data.get("user_id")
+    remove_image = bool(data.get("remove_image"))
 
     if not user_id:
         return jsonify({"error": "Chýba user_id."}), 400
@@ -2885,17 +2886,17 @@ def update_activity(activity_id: int):
                 return jsonify({"error": "Kapacita musí byť aspoň 1."}), 400
             sets.append("capacity = %s"); params.append(capacity_int)
 
-        if image is not None:
+        if image is not None or remove_image:
             # Handle image update/removal
             if isinstance(image, str) and image.startswith("data:image"):
                 stored = _save_activity_image_from_data_url(conn, activity_id, image)
                 if not stored:
                     return jsonify({"error": "Nepodarilo sa uložiť obrázok."}), 400
                 sets.append("image_url = %s"); params.append(stored)
-            elif not image:
+            elif remove_image or (isinstance(image, str) and not image):
                 _delete_activity_image(conn, activity_id)
                 sets.append("image_url = %s"); params.append(None)
-            else:
+            elif image:
                 _delete_activity_image(conn, activity_id)
                 abs_url = _make_abs(str(image))
                 sets.append("image_url = %s"); params.append(abs_url)

@@ -25,12 +25,13 @@ export default function ActivityDetail() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<{ title: string; description: string; capacity: number; image: string | null }>({
+  const [form, setForm] = useState<{ title: string; description: string; capacity: string; image: string | null }>({
     title: "",
     description: "",
-    capacity: 1,
+    capacity: "1",
     image: null,
   });
+  const [removeImage, setRemoveImage] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -76,9 +77,10 @@ export default function ActivityDetail() {
       setForm({
         title: activity.title || "",
         description: activity.description || "",
-        capacity: activity.capacity,
+        capacity: String(activity.capacity),
         image: activity.image_url || null,
       });
+      setRemoveImage(false);
     }
   }, [activity]);
 
@@ -95,6 +97,7 @@ export default function ActivityDetail() {
         reader.readAsDataURL(file);
       });
       setForm((prev) => ({ ...prev, image: dataUrl }));
+      setRemoveImage(false);
     } catch (err: any) {
       alert(err.message || "Nepodarilo sa nacitat obrazok.");
     }
@@ -107,8 +110,9 @@ export default function ActivityDetail() {
       const payload = {
         title: form.title,
         description: form.description,
-        capacity: Number(form.capacity),
+        capacity: parseInt(form.capacity, 10),
         image: form.image,
+        remove_image: removeImage,
         user_id: currentUserId,
       };
       const res = await fetch(`/api/activities/${activityId}`, {
@@ -117,11 +121,17 @@ export default function ActivityDetail() {
         body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error || "Ukladanie zlyhalo.");
-      }
-      setActivity(data);
+        if (!res.ok) {
+          throw new Error(data?.error || "Ukladanie zlyhalo.");
+        }
+      setActivity({
+        ...data,
+        image_url: data?.image_url || null,
+        lat: Number(data?.lat),
+        lng: Number(data?.lng),
+      });
       setEditing(false);
+      setRemoveImage(false);
     } catch (err: any) {
       alert(err.message || "Nepodarilo sa ulozit zmeny.");
     } finally {
@@ -201,27 +211,33 @@ export default function ActivityDetail() {
                   min={1}
                   className="w-32 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2"
                   value={form.capacity}
-                  onChange={(e) => setForm((prev) => ({ ...prev, capacity: Number(e.target.value) || 1 }))}
+                  onChange={(e) => setForm((prev) => ({ ...prev, capacity: e.target.value }))}
                 />
               </div>
               <div className="space-y-2">
                 <label className="block text-sm mb-1 text-gray-700 dark:text-gray-300">Obrazok</label>
                 <input type="file" accept="image/*" onChange={handleFileChange} />
-                {form.image && (
+                {(form.image || activity.image_url) && (
                   <div className="flex items-start gap-3">
                     <img
-                      src={form.image}
+                      src={form.image || activity.image_url || undefined}
                       alt="Nahlad"
                       className="h-24 w-24 object-contain rounded-lg border border-gray-200 dark:border-gray-700"
                     />
                     <button
                       type="button"
                       className="text-sm text-red-600 hover:text-red-700"
-                      onClick={() => setForm((prev) => ({ ...prev, image: null }))}
+                      onClick={() => {
+                        setForm((prev) => ({ ...prev, image: null }));
+                        setRemoveImage(true);
+                      }}
                     >
                       Odstranit obrazok
                     </button>
                   </div>
+                )}
+                {removeImage && (
+                  <p className="text-xs text-red-600">Obrazok bude po ulozeni odstranený.</p>
                 )}
               </div>
               <div className="flex gap-3">
@@ -241,6 +257,7 @@ export default function ActivityDetail() {
                       capacity: activity.capacity,
                       image: activity.image_url || null,
                     });
+                    setRemoveImage(false);
                   }}
                   className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700"
                   disabled={saving}
