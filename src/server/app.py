@@ -326,9 +326,11 @@ BASE_DIR = os.path.dirname(__file__)
 ASSETS_IMG_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "assets", "img"))
 AVATARS_DIR = os.path.join(ASSETS_IMG_DIR, "avatars")
 POST_IMAGES_DIR = os.path.join(ASSETS_IMG_DIR, "posts")
+ACTIVITY_IMAGES_DIR = os.path.join(ASSETS_IMG_DIR, "activities")
 LEGACY_AVATARS_DIR = os.path.join(BASE_DIR, "uploads", "avatars")
 os.makedirs(AVATARS_DIR, exist_ok=True)
 os.makedirs(POST_IMAGES_DIR, exist_ok=True)
+os.makedirs(ACTIVITY_IMAGES_DIR, exist_ok=True)
 ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 def _avatar_disk_path(file_uid: str, ext: str) -> str:
@@ -336,6 +338,9 @@ def _avatar_disk_path(file_uid: str, ext: str) -> str:
 
 def _post_image_disk_path(file_uid: str, ext: str) -> str:
     return os.path.join(POST_IMAGES_DIR, f"{file_uid}{ext}")
+
+def _activity_image_disk_path(file_uid: str, ext: str) -> str:
+    return os.path.join(ACTIVITY_IMAGES_DIR, f"{file_uid}{ext}")
 
 def _legacy_avatar_path_for(user_id: int, ext: str):
     return os.path.join(LEGACY_AVATARS_DIR, f"user_{user_id}{ext}")
@@ -629,6 +634,113 @@ def _make_abs(url: str) -> str:
         return url
     base = (request.host_url or "").rstrip("/")
     return f"{base}{url}"
+
+
+def _delete_activity_image(conn, activity_id: int):
+    """
+    Remove DB rows and files for single activity image.
+    """
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT file_uid, file_ext
+            FROM media_files
+            WHERE owner_type = 'activity' AND owner_id = %s AND purpose = 'activity_image'
+            """,
+            (activity_id,),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            try:
+                os.remove(_activity_image_disk_path(row["file_uid"], row["file_ext"]))
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                logging.warning("Activity image cleanup failed: %s", exc)
+
+        cur.execute(
+            """
+            DELETE FROM media_files
+            WHERE owner_type = 'activity' AND owner_id = %s AND purpose = 'activity_image'
+            """,
+            (activity_id,),
+        )
+        cur.execute("UPDATE activities SET image_url = NULL WHERE id_activity = %s", (activity_id,))
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def _save_activity_image_from_data_url(conn, activity_id: int, data_url: str):
+    """
+    Decode data:image payload, persist to disk + media_files, update activities.image_url.
+    """
+    if not data_url or not isinstance(data_url, str) or not data_url.startswith("data:image"):
+        return None
+
+    match = re.match(r"data:image/(png|jpeg|jpg|gif|webp);base64,(.+)", data_url, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+
+    ext_raw, b64data = match.groups()
+    ext = "." + ext_raw.lower().replace("jpeg", "jpg")
+    if ext not in ALLOWED_IMAGE_EXTS:
+        return None
+
+    try:
+        blob = base64.b64decode(b64data)
+    except Exception as exc:
+        logging.warning("Activity image base64 decode failed: %s", exc)
+        return None
+
+    file_uid = str(uuid.uuid4())
+    path = _activity_image_disk_path(file_uid, ext)
+    try:
+        with open(path, "wb") as f:
+            f.write(blob)
+    except Exception as exc:
+        logging.warning("Activity image save failed: %s", exc)
+        return None
+
+    size_bytes = os.path.getsize(path)
+    storage_path = f"/assets/img/activities/{file_uid}{ext}"
+    storage_url = _make_abs(storage_path)
+
+    # keep single image: drop previous rows/files first
+    _delete_activity_image(conn, activity_id)
+
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO media_files
+              (owner_type, owner_id, purpose, sort_order, file_uid, file_name, file_ext, mime_type, size_bytes, storage_path)
+            VALUES
+              ('activity', %s, 'activity_image', 0, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                activity_id,
+                file_uid,
+                f"activity_{activity_id}{ext}",
+                ext,
+                f"image/{ext.strip('.')}",
+                size_bytes,
+                storage_path,
+            ),
+        )
+        cur.execute("UPDATE activities SET image_url = %s WHERE id_activity = %s", (storage_url, activity_id))
+        conn.commit()
+        return storage_url
+    except Exception as exc:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        logging.warning("Activity image DB save failed: %s", exc)
+        return None
+    finally:
+        cur.close()
 
 
 def _save_post_image_from_data_url(conn, post_id: int, data_url: str):
@@ -2226,6 +2338,11 @@ def serve_post_image(filename: str):
     return send_from_directory(POST_IMAGES_DIR, filename, as_attachment=False)
 
 
+@app.get("/assets/img/activities/<path:filename>")
+def serve_activity_image(filename: str):
+    return send_from_directory(ACTIVITY_IMAGES_DIR, filename, as_attachment=False)
+
+
 @app.get("/api/profile/<int:user_id>")
 def get_profile(user_id: int):
     """Načíta detaily profilu pre daného používateľa (bez hesla)."""
@@ -2436,6 +2553,9 @@ def list_activities():
         total = cur.fetchone()["total"]
         cur.execute(sql, params)
         items = cur.fetchall()
+        for item in items:
+            if item.get("image_url"):
+                item["image_url"] = _make_abs(item["image_url"])
         return jsonify({"items": items, "pagination": {
             "page": page, "page_size": page_size,
             "total": total, "pages": (total + page_size - 1)//page_size
@@ -2514,7 +2634,7 @@ def create_activity():
     data = request.get_json()
     title = data.get("title")
     description = data.get("description")
-    image_url = data.get("image_url")
+    image = data.get("image") or data.get("image_url")
     capacity = data.get("capacity")
     user_id = data.get("user_id")
     address = data.get("address")  # nový vstup z frontendu
@@ -2545,17 +2665,158 @@ def create_activity():
         cur.execute("""
             INSERT INTO activities (title, description, image_url, capacity, lat, lng, user_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (title, description, image_url, capacity, lat, lng, user_id))
+        """, (title, description, None, capacity, lat, lng, user_id))
         activity_id = cur.lastrowid
         conn.commit()
+
+        if image:
+            if isinstance(image, str) and image.startswith("data:image"):
+                stored = _save_activity_image_from_data_url(conn, activity_id, image)
+                if stored:
+                    image = stored
+            else:
+                image = _make_abs(str(image))
+                cur.execute(
+                    "UPDATE activities SET image_url = %s WHERE id_activity = %s",
+                    (image, activity_id),
+                )
+                conn.commit()
+
+        cur = conn.cursor(dictionary=True)
         cur.execute("SELECT * FROM activities WHERE id_activity = %s", (activity_id,))
         row = cur.fetchone()
-        keys = [desc[0] for desc in cur.description]
-        activity = dict(zip(keys, row))
-        return jsonify(activity), 201
+        if row and row.get("image_url"):
+            row["image_url"] = _make_abs(row["image_url"])
+        return jsonify(row), 201
     finally:
         conn.close()
 
+
+@app.post("/api/activities/<int:activity_id>/image")
+def upload_activity_image(activity_id: int):
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "Súbor nebol dodaný."}), 400
+
+    filename = secure_filename(file.filename)
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower()
+    if ext not in ALLOWED_IMAGE_EXTS:
+        return jsonify({"error": "Nepodporovaný formát. Povolené: jpg, jpeg, png, gif, webp"}), 400
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM activities WHERE id_activity = %s", (activity_id,))
+        if not cur.fetchone():
+            return jsonify({"error": "Aktivita neexistuje."}), 404
+    finally:
+        cur.close()
+
+    file_uid = str(uuid.uuid4())
+    path = _activity_image_disk_path(file_uid, ext)
+    try:
+        file.save(path)
+    except Exception as exc:
+        return jsonify({"error": f"Ukladanie zlyhalo: {exc}"}), 500
+
+    size_bytes = os.path.getsize(path)
+    storage_path = f"/assets/img/activities/{file_uid}{ext}"
+    storage_url = _make_abs(storage_path)
+
+    cur = None
+    try:
+        _delete_activity_image(conn, activity_id)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO media_files
+              (owner_type, owner_id, purpose, sort_order, file_uid, file_name, file_ext, mime_type, size_bytes, storage_path)
+            VALUES
+              ('activity', %s, 'activity_image', 0, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                activity_id,
+                file_uid,
+                filename,
+                ext,
+                file.mimetype or None,
+                size_bytes,
+                storage_path,
+            ),
+        )
+        cur.execute(
+            "UPDATE activities SET image_url = %s WHERE id_activity = %s",
+            (storage_url, activity_id),
+        )
+        conn.commit()
+    except Exception as exc:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        return jsonify({"error": f"Ukladanie zlyhalo: {exc}"}), 500
+    finally:
+        if cur:
+            cur.close()
+
+    return jsonify({"url": storage_url, "uid": file_uid, "storage_path": storage_path}), 201
+
+
+@app.get("/api/activities/<int:activity_id>/image")
+def get_activity_image_meta(activity_id: int):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT file_uid, storage_path
+            FROM media_files
+            WHERE owner_type = 'activity' AND owner_id = %s AND purpose = 'activity_image'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (activity_id,),
+        )
+        row = cur.fetchone()
+        if row:
+            return jsonify(
+                {
+                    "url": _make_abs(row["storage_path"]),
+                    "storage_path": row["storage_path"],
+                    "uid": row["file_uid"],
+                }
+            ), 200
+
+        cur.execute("SELECT image_url FROM activities WHERE id_activity = %s", (activity_id,))
+        fallback = cur.fetchone()
+        if fallback and fallback[0]:
+            return jsonify({"url": _make_abs(fallback[0]), "uid": None}), 200
+
+        return jsonify({"error": "Obrázok pre aktivitu neexistuje."}), 404
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.delete("/api/activities/<int:activity_id>/image")
+def delete_activity_image(activity_id: int):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM activities WHERE id_activity = %s", (activity_id,))
+        exists = cur.fetchone()
+        cur.close()
+        if not exists:
+            return jsonify({"error": "Aktivita neexistuje."}), 404
+
+        _delete_activity_image(conn, activity_id)
+        return jsonify({"success": True}), 200
+    except Exception as exc:
+        logging.warning("Failed to delete activity image: %s", exc)
+        return jsonify({"error": "Nepodarilo sa odstrániť obrázok."}), 500
+    finally:
+        conn.close()
 
 
 @app.post("/api/activities/<int:activity_id>/signup")
