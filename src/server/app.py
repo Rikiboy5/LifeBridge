@@ -684,7 +684,7 @@ def _delete_article_image(conn, article_id: int):
             """
             SELECT file_uid, file_ext
             FROM media_files
-            WHERE owner_type = 'article' AND owner_id = %s AND purpose = 'attachment'
+            WHERE owner_type = 'article' AND owner_id = %s AND purpose IN ('attachment','article_image')
             """,
             (article_id,),
         )
@@ -699,7 +699,7 @@ def _delete_article_image(conn, article_id: int):
         cur.execute(
             """
             DELETE FROM media_files
-            WHERE owner_type = 'article' AND owner_id = %s AND purpose = 'attachment'
+            WHERE owner_type = 'article' AND owner_id = %s AND purpose IN ('attachment','article_image')
             """,
             (article_id,),
         )
@@ -3166,6 +3166,94 @@ def create_article():
 
         return jsonify({"id_article": new_id, "image_url": _make_abs(image) if image else None}), 201
     finally:
+        conn.close()
+
+
+@app.put("/api/articles/<int:id_article>")
+def update_article(id_article: int):
+    data = request.get_json(force=True) or {}
+    title = data.get("title")
+    text = data.get("text")
+    image = data.get("image") or data.get("image_url")
+    remove_image = bool(data.get("remove_image"))
+
+    if not any([title is not None, text is not None, image is not None, remove_image]):
+        return jsonify({"error": "Nie je co aktualizovat."}), 400
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT 1 FROM articles WHERE id_article = %s", (id_article,))
+        if not cur.fetchone():
+            return jsonify({"error": "Article not found"}), 404
+    finally:
+        cur.close()
+
+    cur = conn.cursor()
+    try:
+        sets = []
+        params = []
+        if title is not None:
+            sets.append("title = %s"); params.append(title)
+        if text is not None:
+            sets.append("text = %s"); params.append(text)
+
+        if image is not None or remove_image:
+            if isinstance(image, str) and image.startswith("data:image"):
+                stored = _save_article_image_from_data_url(conn, id_article, image)
+                if not stored:
+                    return jsonify({"error": "Nepodarilo sa ulozit obrazok."}), 400
+                sets.append("image_url = %s"); params.append(stored)
+            elif remove_image or (isinstance(image, str) and not image):
+                _delete_article_image(conn, id_article)
+                sets.append("image_url = %s"); params.append(None)
+            elif image:
+                _delete_article_image(conn, id_article)
+                abs_url = _make_abs(str(image))
+                sets.append("image_url = %s"); params.append(abs_url)
+
+        if sets:
+            params.append(id_article)
+            cur.execute(f"UPDATE articles SET {', '.join(sets)} WHERE id_article = %s", tuple(params))
+            conn.commit()
+
+        cur.close()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM articles WHERE id_article = %s", (id_article,))
+        row = cur.fetchone()
+        if row and row.get("image_url"):
+            row["image_url"] = _make_abs(row["image_url"])
+        return jsonify(row), 200
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.delete("/api/articles/<int:id_article>")
+def delete_article(id_article: int):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        _delete_article_image(conn, id_article)
+        cur.execute("DELETE FROM articles WHERE id_article = %s", (id_article,))
+        if cur.rowcount == 0:
+            return jsonify({"error": "Article not found"}), 404
+        conn.commit()
+        return jsonify({"success": True}), 200
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        cur.close()
         conn.close()
 
 @app.post("/api/articles/<int:article_id>/image")

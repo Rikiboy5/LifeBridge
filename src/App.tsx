@@ -52,7 +52,7 @@ export default function App() {
           <Route path="/activities" element={<Blog />} />
           <Route path="/activities/create" element={<CreateActivity />} />
           <Route path="/activities/:id" element={<ActivityDetail />} />
-          <Route path="/article/:id" element={<ArticleDetail />} />
+          <Route path="/articles/:id" element={<ArticleDetail />} />
           <Route path="/articles/new" element={<NewArticle />} />
         </Routes>
       </ChatProvider>

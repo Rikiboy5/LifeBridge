@@ -1,0 +1,69 @@
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import MainLayout from "../layouts/MainLayout";
+
+interface ArticleDetailType {
+  id_article: number;
+  title: string;
+  text: string;
+  image_url?: string | null;
+  created_at?: string;
+}
+
+export default function ArticleDetail() {
+  const { id } = useParams<{ id: string }>();
+  const [article, setArticle] = useState<ArticleDetailType | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!id) return;
+
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await fetch(`/api/articles/${id}`);
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.error || "Nepodarilo sa nacítat clánok");
+        }
+        setArticle(data);
+      } catch (e: any) {
+        setError(e.message || "Chyba pri nacítaní clánku");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [id]);
+
+  return (
+    <MainLayout>
+      <div className="max-w-4xl mx-auto p-6 space-y-6">
+        {loading && <p>Nacítavam clánok...</p>}
+        {error && (
+          <p className="text-red-500">
+            {error}
+          </p>
+        )}
+        {article && (
+          <>
+            <h1 className="text-4xl font-bold">{article.title}</h1>
+
+            {article.image_url && (
+              <img
+                src={article.image_url}
+                alt={article.title}
+                className="w-full max-w-2xl mx-auto rounded-xl shadow-md object-cover"
+              />
+            )}
+
+            <p className="text-lg leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-line">
+              {article.text}
+            </p>
+          </>
+        )}
+      </div>
+    </MainLayout>
+  );
+}
