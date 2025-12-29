@@ -207,7 +207,6 @@ export default function PostDetail() {
         reader.readAsDataURL(file);
       });
       setFormImage(dataUrl); // uloží sa až po kliknutí na Uložiť
-      setPost((prev) => (prev ? { ...prev, image: dataUrl } : prev));
     } catch (err: any) {
       alert(err.message || "Nepodarilo sa nahrať obrázok.");
     } finally {
@@ -257,6 +256,15 @@ export default function PostDetail() {
     setFormImage(post.image ?? null);
     setFormDescription(post.description);
   };
+
+  useEffect(() => {
+    if (editing && post) {
+      setFormTitle(post.title);
+      setFormCategory(post.category);
+      setFormImage(post.image ?? null);
+      setFormDescription(post.description);
+    }
+  }, [editing, post]);
 
   const handleExtraImagesChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!post) return;
