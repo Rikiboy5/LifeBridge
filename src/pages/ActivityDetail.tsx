@@ -77,17 +77,19 @@ export default function ActivityDetail() {
       <div className="max-w-4xl mx-auto p-6 space-y-8">
         {/* Obrázok */}
         {activity.image_url && (
-          <img
-            src={activity.image_url}
-            alt={activity.title}
-            className="w-full h-72 object-cover rounded-xl shadow-md"
-          />
+          <div className="w-full max-h-[420px] rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-md overflow-hidden flex items-center justify-center">
+            <img
+              src={activity.image_url}
+              alt={activity.title}
+              className="w-full max-h-[400px] object-contain bg-white dark:bg-gray-900"
+            />
+          </div>
         )}
 
         {/* Názov a popis */}
         <div className="space-y-4">
           <h1 className="text-3xl font-bold">{activity.title}</h1>
-          <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
+          <p className="text-gray-700 dark:text-gray-300 leading-relaxed break-words whitespace-pre-line">
             {activity.description || "Bez popisu"}
           </p>
           <p className="text-sm text-gray-500">
