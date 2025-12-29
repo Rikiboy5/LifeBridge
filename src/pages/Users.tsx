@@ -531,7 +531,7 @@ export default function Users() {
                 <p className="text-lg font-semibold text-gray-900 dark:text-white overflow-hidden text-ellipsis whitespace-nowrap max-w-[200px] sm:max-w-[220px]">
                   {user.meno} {user.priezvisko}
                 </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-sm text-gray-500 dark:text-gray-400 overflow-hidden text-ellipsis whitespace-nowrap max-w-[220px] sm:max-w-[240px]">
                   {user.mail}
                 </p>
                 <span className="inline-flex mt-1 -ml-1 items-center px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-200">
