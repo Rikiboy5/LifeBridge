@@ -32,6 +32,10 @@ export default function ActivityDetail() {
     image: null,
   });
   const [removeImage, setRemoveImage] = useState(false);
+  const [signups, setSignups] = useState<Array<{ id_user: number; meno?: string; priezvisko?: string; rola?: string }>>(
+    []
+  );
+  const [signupsLoading, setSignupsLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -85,6 +89,30 @@ export default function ActivityDetail() {
   }, [activity]);
 
   const isOwner = !!activity && !!currentUserId && Number(activity.user_id) === Number(currentUserId);
+  const isSignedUp = !!currentUserId && signups.some((s) => Number(s.id_user) === Number(currentUserId));
+  const isFull = !!activity && activity.attendees_count >= activity.capacity && !isSignedUp;
+
+  const refreshSignups = async () => {
+    if (!Number.isFinite(activityId)) return;
+    setSignupsLoading(true);
+    try {
+      const res = await fetch(`/api/activities/${activityId}/signups`);
+      if (res.ok) {
+        const rows = await res.json();
+        setSignups(Array.isArray(rows) ? rows : []);
+      } else {
+        setSignups([]);
+      }
+    } catch {
+      setSignups([]);
+    } finally {
+      setSignupsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshSignups();
+  }, [activityId]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -132,10 +160,57 @@ export default function ActivityDetail() {
       });
       setEditing(false);
       setRemoveImage(false);
+      refreshSignups();
     } catch (err: any) {
       alert(err.message || "Nepodarilo sa ulozit zmeny.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSignup = async () => {
+    if (!activity) return;
+    if (!currentUserId) {
+      navigate("/login");
+      return;
+    }
+    if (isFull) {
+      alert("Kapacita je naplnena.");
+      return;
+    }
+    try {
+      const res = await fetch(`/api/activities/${activityId}/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: currentUserId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Prihlasenie zlyhalo.");
+      if (activity && typeof data?.attendees_count === "number") {
+        setActivity({ ...activity, attendees_count: data.attendees_count });
+      }
+      await refreshSignups();
+    } catch (err: any) {
+      alert(err.message || "Prihlasenie zlyhalo.");
+    }
+  };
+
+  const handleCancelSignup = async () => {
+    if (!activity || !currentUserId) return;
+    try {
+      const res = await fetch(`/api/activities/${activityId}/signup`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: currentUserId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Odhlasenie zlyhalo.");
+      if (activity && typeof data?.attendees_count === "number") {
+        setActivity({ ...activity, attendees_count: data.attendees_count });
+      }
+      await refreshSignups();
+    } catch (err: any) {
+      alert(err.message || "Odhlasenie zlyhalo.");
     }
   };
 
@@ -293,14 +368,56 @@ export default function ActivityDetail() {
           />
         </div>
 
-        {/* Akcne tlacidlo */}
-        <div className="flex justify-center pt-4">
-          <button
-            onClick={() => alert("Prihlasenie bude doplnene neskor")}
-            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
-          >
-            Prihlasit sa
-          </button>
+        {/* Prihlasenie / odhlasenie */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            {isSignedUp ? (
+              <button
+                onClick={handleCancelSignup}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition"
+              >
+                Odhlasit sa
+              </button>
+            ) : (
+              <button
+                onClick={handleSignup}
+                disabled={isFull}
+                className={`px-4 py-2 rounded-lg text-white transition ${
+                  isFull ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
+                }`}
+              >
+                {isFull ? "Kapacita plna" : "Prihlasit sa"}
+              </button>
+            )}
+            <span className="text-sm text-gray-600">
+              {activity.attendees_count}/{activity.capacity} prihlasenych
+            </span>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-900">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">Prihlaseni uzivatelia</p>
+              {signupsLoading && <span className="text-xs text-gray-500">Nacitavam...</span>}
+            </div>
+            {signups.length === 0 ? (
+              <p className="text-sm text-gray-500">Zatial nikto.</p>
+            ) : (
+              <div className="space-y-2">
+                {signups.map((u) => (
+                  <button
+                    key={u.id_user}
+                    onClick={() => navigate(`/user/${u.id_user}`)}
+                    className="w-full flex justify-between items-center text-left px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-100 dark:border-gray-800"
+                  >
+                    <span className="text-sm text-gray-800 dark:text-gray-100">
+                      {(u.meno || "").trim()} {(u.priezvisko || "").trim()}
+                    </span>
+                    <span className="text-xs text-gray-500">{u.rola || ""}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </MainLayout>

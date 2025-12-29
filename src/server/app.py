@@ -1,4 +1,4 @@
-# server/app.py
+﻿# server/app.py
 from flask import Flask, request, jsonify, send_from_directory, g
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
@@ -2924,7 +2924,7 @@ def signup_activity(activity_id):
     user_id = data.get("user_id")
 
     if not user_id:
-        return jsonify({"error": "Nepodarilo sa identifikovať používateľa."}), 400
+        return jsonify({"error": "Nepodarilo sa identifikovat pouzivatela."}), 400
 
     conn = get_conn()
     try:
@@ -2935,13 +2935,13 @@ def signup_activity(activity_id):
             return jsonify({"error": "Aktivita neexistuje."}), 404
         capacity, attendees_count = row
         if attendees_count >= capacity:
-            return jsonify({"error": "Kapacita je naplnená."}), 400
+            return jsonify({"error": "Kapacita je naplnena."}), 400
 
         cur.execute("SELECT 1 FROM activity_signups WHERE activity_id = %s AND user_id = %s", (activity_id, user_id))
         if cur.fetchone() is not None:
-            return jsonify({"error": "Už ste prihlásený na túto aktivitu."}), 400
+            return jsonify({"error": "Uz ste prihlaseny na tuto aktivitu."}), 400
 
-        # Vytvor prihlásenie + zvýš počet účastníkov
+        # Vytvor prihlasenie + zvys pocet ucastnikov
         cur.execute("INSERT INTO activity_signups (activity_id, user_id) VALUES (%s, %s)", (activity_id, user_id))
         cur.execute("UPDATE activities SET attendees_count = attendees_count + 1 WHERE id_activity = %s", (activity_id,))
         conn.commit()
@@ -2952,14 +2952,13 @@ def signup_activity(activity_id):
     finally:
         conn.close()
 
-
 @app.delete("/api/activities/<int:activity_id>/signup")
 def cancel_signup(activity_id):
     data = request.get_json()
     user_id = data.get("user_id")
 
     if not user_id:
-        return jsonify({"error": "Nepodarilo sa identifikovať používateľa."}), 400
+        return jsonify({"error": "Nepodarilo sa identifikovat pouzivatela."}), 400
 
     conn = get_conn()
     try:
@@ -2967,7 +2966,29 @@ def cancel_signup(activity_id):
         cur.execute("DELETE FROM activity_signups WHERE activity_id = %s AND user_id = %s", (activity_id, user_id))
         cur.execute("UPDATE activities SET attendees_count = GREATEST(attendees_count - 1, 0) WHERE id_activity = %s", (activity_id,))
         conn.commit()
-        return jsonify({"message": "Úspešne odhlásený"})
+        cur.execute("SELECT attendees_count FROM activities WHERE id_activity = %s", (activity_id,))
+        attendees_count = cur.fetchone()[0]
+        return jsonify({"message": "uspesne odhlaseny", "attendees_count": attendees_count})
+    finally:
+        conn.close()
+
+@app.get("/api/activities/<int:activity_id>/signups")
+def list_activity_signups(activity_id: int):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT u.id_user, u.meno, u.priezvisko, u.rola, s.created_at
+            FROM activity_signups s
+            JOIN users u ON u.id_user = s.user_id
+            WHERE s.activity_id = %s
+            ORDER BY s.created_at ASC
+            """,
+            (activity_id,),
+        )
+        rows = cur.fetchall()
+        return jsonify(rows), 200
     finally:
         conn.close()
 
@@ -3028,3 +3049,4 @@ def create_article():
 # ==========================================
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
+
