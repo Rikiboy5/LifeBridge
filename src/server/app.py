@@ -2074,6 +2074,22 @@ def get_profile_avatar_meta(user_id: int):
         conn.close()
 
 
+@app.delete("/api/profile/<int:user_id>/avatar")
+def delete_profile_avatar(user_id: int):
+    conn = get_conn()
+    try:
+        meta = _find_avatar_meta(conn, user_id)
+        if not meta:
+            return jsonify({"error": "Avatar nen?jden?"}), 404
+        _delete_avatar_records(conn, user_id)
+        return jsonify({"status": "ok"}), 200
+    except Exception as exc:
+        logging.exception("Failed to delete avatar for user %s: %s", user_id, exc)
+        return jsonify({"error": "Nepodarilo sa odstr?ni? avatar."}), 500
+    finally:
+        conn.close()
+
+
 @app.get("/assets/img/avatars/<path:filename>")
 def serve_avatar_file(filename: str):
     return send_from_directory(AVATARS_DIR, filename, as_attachment=False)
