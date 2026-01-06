@@ -184,18 +184,6 @@ export default function Home() {
     category: a.category ?? "default",
   }));
 
-  useEffect(() => {
-    if (!articles.length) return;
-    let idx = 0;
-    const timer = setInterval(() => {
-      idx = (idx + 1) % articles.length;
-      const el = articleScrollerRef.current?.children?.[idx] as HTMLElement | undefined;
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-      }
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [articles.length]);
 
   return (
     <MainLayout>
