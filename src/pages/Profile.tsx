@@ -112,6 +112,9 @@ export default function Profile() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
   const [avatarSrc, setAvatarSrc] = useState<string | null>(null);
+  const [avatarDraftSrc, setAvatarDraftSrc] = useState<string | null>(null);
+  const [avatarMarkedForRemoval, setAvatarMarkedForRemoval] = useState(false);
+  const avatarFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [form, setForm] = useState({
     meno: "",
@@ -130,8 +133,16 @@ export default function Profile() {
   const [cityInputValue, setCityInputValue] = useState("");
   const [cityValidated, setCityValidated] = useState(false);
 
-  const baseUrl =
-    (import.meta as any).env?.VITE_API_URL ?? "";
+  const baseUrl = useMemo(() => {
+    const env = (import.meta as any).env?.VITE_API_URL ?? "";
+    if (env) return env.replace(/\/$/, "");
+    if (typeof window !== "undefined") {
+      const origin = window.location.origin;
+      if (origin.includes(":5173")) return origin.replace(":5173", ":5000");
+      return origin;
+    }
+    return "";
+  }, []);
 
   const currentUserId = useMemo<number | null>(() => {
     try {
@@ -276,6 +287,9 @@ export default function Profile() {
     }
   }, [viewedUserId]);
 
+  const toAbsolute = (url?: string | null) =>
+    url ? `${baseUrl}${url}` : null;
+
   useEffect(() => {
     if (!viewedUserId) return;
     (async () => {
@@ -288,12 +302,19 @@ export default function Profile() {
           return;
         }
         const data = await res.json();
-        if (data?.url) setAvatarSrc(`${data.url}`);
+        setAvatarSrc(toAbsolute(data?.url));
       } catch {
         setAvatarSrc(null);
       }
     })();
   }, [viewedUserId, baseUrl]);
+  useEffect(() => {
+    if (isEditing) {
+      setAvatarDraftSrc(avatarSrc);
+      setAvatarMarkedForRemoval(false);
+      if (avatarFileInputRef.current) avatarFileInputRef.current.value = "";
+    }
+  }, [isEditing, avatarSrc]);
 
   const fullName = useMemo(() => {
     if (!profile) return "";
@@ -314,7 +335,12 @@ export default function Profile() {
     return (fallback[0] || "?").toUpperCase();
   }, [profile?.meno, profile?.priezvisko]);
 
-  const avatarAlt = fullName || profile?.mail || "Profilová fotka";
+  const avatarAlt = fullName || profile?.mail || "Profilova fotka";
+  const currentAvatarSrc = isEditing
+    ? avatarMarkedForRemoval
+      ? null
+      : avatarDraftSrc ?? avatarSrc
+    : avatarSrc;
 
   const AvatarCircle = ({
     sizeClass = "w-32 h-32",
@@ -325,10 +351,10 @@ export default function Profile() {
     textClass?: string;
     borderClass?: string;
   }) => {
-    if (avatarSrc) {
+    if (currentAvatarSrc) {
       return (
         <img
-          src={avatarSrc}
+          src={currentAvatarSrc}
           alt={avatarAlt}
           className={`${sizeClass} rounded-full object-cover ${borderClass}`}
         />
@@ -460,27 +486,52 @@ export default function Profile() {
       if (cmp(form.about) !== cmp(orig.about))
         changed.about = form.about || null;
 
-      if (Object.keys(changed).length === 0) {
+      const needsProfileUpdate = Object.keys(changed).length > 0;
+      if (!needsProfileUpdate && !avatarMarkedForRemoval) {
         setIsEditing(false);
+        setAvatarDraftSrc(avatarSrc);
+        setAvatarMarkedForRemoval(false);
         return;
       }
 
-      const res = await fetch(`/api/profile/${profile.id_user}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(changed),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data?.error || "Nepodarilo sa uložiť profil.");
-      } else {
-        const normalized: User = {
-          ...data,
-          datum_narodenia: onlyDate(data.datum_narodenia) || null,
-        };
-        setProfile(normalized);
-        setIsEditing(false);
+      if (needsProfileUpdate) {
+        const res = await fetch(`/api/profile/${profile.id_user}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(changed),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data?.error || "Nepodarilo sa uložiť profil.");
+          return;
+        } else {
+          const normalized: User = {
+            ...data,
+            datum_narodenia: onlyDate(data.datum_narodenia) || null,
+          };
+          setProfile(normalized);
+        }
       }
+
+      if (avatarMarkedForRemoval) {
+        const res = await fetch(
+          `/api/profile/${profile.id_user}/avatar`,
+          { method: "DELETE" }
+        );
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          alert(data?.error || "Nepodarilo sa odstrániť fotku.");
+          return;
+        }
+        setAvatarSrc(null);
+        setAvatarDraftSrc(null);
+        setAvatarMarkedForRemoval(false);
+        if (avatarFileInputRef.current) {
+          avatarFileInputRef.current.value = "";
+        }
+      }
+
+      setIsEditing(false);
     } catch (e) {
       alert("Chyba siete pri ukladaní profilu.");
     } finally {
@@ -854,7 +905,7 @@ export default function Profile() {
                 {/* Avatar upload */}
                 <div>
                   <label className="block text-sm mb-1">
-                    Profilová fotka
+                    Profilova fotka
                   </label>
                   <div className="flex items-center gap-4">
                     <AvatarCircle
@@ -862,32 +913,55 @@ export default function Profile() {
                       textClass="text-lg"
                       borderClass="border border-gray-300 dark:border-gray-600"
                     />
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={async (e) => {
-                        if (!profile || !canEditProfile) return;
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const fd = new FormData();
-                        fd.append("file", file);
-                        try {
-                          const res = await fetch(
-                            `/api/profile/${profile.id_user}/avatar`,
-                            { method: "POST", body: fd }
-                          );
-                          const data = await res.json();
-                          if (!res.ok)
-                            throw new Error(
-                              data?.error || "Upload zlyhal"
+                    <div className="flex flex-col gap-2 items-start">
+                      <input
+                        ref={avatarFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={async (e) => {
+                          if (!profile || !canEditProfile) return;
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const fd = new FormData();
+                          fd.append("file", file);
+                          try {
+                            const res = await fetch(
+                              `/api/profile/${profile.id_user}/avatar`,
+                              { method: "POST", body: fd }
                             );
-                          if (data?.url)
-                            setAvatarSrc(`${data.url}`);
-                        } catch (err) {
-                          alert("Nepodarilo sa nahrať avatar.");
-                        }
-                      }}
-                    />
+                            const data = await res.json();
+                            if (!res.ok)
+                              throw new Error(
+                                data?.error || "Upload zlyhal"
+                              );
+                            if (data?.url) {
+                              const abs = toAbsolute(data.url);
+                              setAvatarSrc(abs);
+                              setAvatarDraftSrc(abs);
+                              setAvatarMarkedForRemoval(false);
+                              if (avatarFileInputRef.current) {
+                                avatarFileInputRef.current.value = "";
+                              }
+                            }
+                          } catch (err) {
+                            alert("Nepodarilo sa nahrať avatar.");
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="text-sm text-red-600 hover:underline"
+                        onClick={() => {
+                          setAvatarDraftSrc(null);
+                          setAvatarMarkedForRemoval(true);
+                          if (avatarFileInputRef.current) {
+                            avatarFileInputRef.current.value = "";
+                          }
+                        }}
+                      >
+                        Odstranit fotku (nastavit default)
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -1030,6 +1104,11 @@ export default function Profile() {
                     // resetuj validáciu pri zrušení
                     setCityInputValue(profile.mesto ?? "");
                     setCityValidated(true);
+                    setAvatarDraftSrc(avatarSrc);
+                    setAvatarMarkedForRemoval(false);
+                    if (avatarFileInputRef.current) {
+                      avatarFileInputRef.current.value = "";
+                    }
                   }}
                   className="px-4 py-2 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-700"
                   disabled={saving}
@@ -1076,3 +1155,4 @@ export default function Profile() {
     </MainLayout>
   );
 }
+

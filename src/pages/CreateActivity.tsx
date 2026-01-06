@@ -11,10 +11,16 @@ interface AddressSuggestion {
 export default function CreateActivity() {
   const navigate = useNavigate();
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{
+    title: string;
+    description: string;
+    image: string | null;
+    capacity: number;
+    address: string;
+  }>({
     title: "",
     description: "",
-    image_url: "",
+    image: null,
     capacity: 10,
     address: "",
   });
@@ -65,6 +71,19 @@ export default function CreateActivity() {
         fetchAddressSuggestions(value);
       }, 500) as any;
     }
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      setForm((prev) => ({ ...prev, image: null }));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setForm((prev) => ({ ...prev, image: reader.result as string }));
+    };
+    reader.readAsDataURL(file);
   };
 
   const fetchAddressSuggestions = async (query: string) => {
@@ -175,7 +194,7 @@ export default function CreateActivity() {
         body: JSON.stringify({
           title: form.title,
           description: form.description,
-          image_url: form.image_url,
+          image: form.image,
           capacity: form.capacity,
           address: form.address,
           user_id: user.id,
@@ -297,20 +316,38 @@ export default function CreateActivity() {
             </p>
           </div>
 
-          {/* URL obrázka */}
+          {/* Obrázok aktivity */}
           <div>
-            <label htmlFor="image_url" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              URL obrázka
+            <label htmlFor="image" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Obrázok aktivity
             </label>
             <input
-              type="url"
-              id="image_url"
-              name="image_url"
-              value={form.image_url}
-              onChange={handleChange}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              placeholder="https://..."
+              type="file"
+              id="image"
+              name="image"
+              onChange={handleImageChange}
+              accept="image/*"
+              className="w-full text-gray-900 dark:text-white"
             />
+            {form.image && (
+              <div className="mt-3 space-y-2">
+                <img
+                  src={form.image}
+                  alt="Nahlad aktivity"
+                  className="rounded-lg shadow-md max-h-48 object-contain border border-gray-200 dark:border-gray-700"
+                />
+                <button
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, image: null }))}
+                  className="text-sm text-red-600 hover:text-red-700"
+                >
+                  Odstrániť náhľad
+                </button>
+              </div>
+            )}
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Obrázok sa uloží do assets/img/activities. Povolené: jpg, jpeg, png, gif, webp.
+            </p>
           </div>
 
           {/* Kapacita */}

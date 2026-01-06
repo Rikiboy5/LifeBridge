@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
 import MainLayout from "../layouts/MainLayout";
-import Article from "../components/Article";
 import Map from "../components/Map";
 import { Link } from "react-router-dom";
 
@@ -59,6 +58,7 @@ export default function Home() {
   const [articles, setArticles] = useState<ArticleType[]>([]);
   const [articlesError, setArticlesError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const articleScrollerRef = useRef<HTMLDivElement | null>(null);
 
   // ---- LOAD ARTICLES ----
   const storedUser = JSON.parse(localStorage.getItem("user") || "null");
@@ -184,6 +184,7 @@ export default function Home() {
     category: a.category ?? "default",
   }));
 
+
   return (
     <MainLayout>
       <div className="max-w-6xl mx-auto p-8 space-y-12">
@@ -239,25 +240,28 @@ export default function Home() {
                     to={`/activities/${a.id_activity}`}
                     className="snap-center flex-shrink-0 w-[90%] sm:w-[70%] md:w-[55%] lg:w-[45%] transition-transform duration-300 hover:scale-[1.02]"
                   >
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
-                      {a.image_url && (
-                        <img src={a.image_url} alt={a.title} className="w-full h-56 object-cover" />
-                      )}
-                      <div className="p-4 space-y-2">
-                        <h3 className="text-lg font-medium line-clamp-1">{a.title}</h3>
-                        {a.description && (
-                          <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
-                            {a.description}
-                          </p>
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300 flex flex-col h-full">
+                      <div className="h-56 w-full bg-gray-100 dark:bg-gray-900 flex items-center justify-center overflow-hidden">
+                        {a.image_url ? (
+                          <img src={a.image_url} alt={a.title} className="h-full w-full object-contain" />
+                        ) : (
+                          <span className="text-sm text-gray-400">Bez obrázka</span>
                         )}
-                        <p className="text-xs text-gray-500">
-                          Kapacita {a.attendees_count}/{a.capacity}
-                        </p>
+                      </div>
+                      <div className="p-4 space-y-2 flex-1 flex flex-col justify-between">
+                        <div className="space-y-2">
+                          <h3 className="text-lg font-medium line-clamp-2">{a.title}</h3>
+                          <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 break-words break-all">
+                            {a.description || "Bez popisu"}
+                          </p>
+                        </div>
+                        <p className="text-xs text-gray-500">Kapacita {a.attendees_count}/{a.capacity}</p>
                       </div>
                     </div>
                   </Link>
                 ))}
-              </div>
+
+            </div>
             </div>
           )}
         </section>
@@ -347,40 +351,63 @@ export default function Home() {
         </section>
 
         {/* === ARTICLES === */}
-        <section className="space-y-6 mt-10">
-          <h2 className="text-2xl font-semibold">Edukačné články</h2>
-                    {articlesError && <p className="text-red-500">{articlesError}</p>}
+        <section className="space-y-4 mt-10">
+          <div className="flex items-center justify-between">
+            <h2 className="text-2xl font-semibold">Edukacne clanky</h2>
+            {isAdmin && (
+              <Link
+                to="/articles/new"
+                className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition"
+              >
+                + Pridat clanok
+              </Link>
+            )}
+          </div>
+
+          {articlesError && <p className="text-red-500">{articlesError}</p>}
 
           {articles.length === 0 && !articlesError && (
-            <p className="text-gray-500">Zatiaľ nemáme žiadne články.</p>
+            <p className="text-gray-500">Zatial nemame ziadne clanky.</p>
           )}
 
-          <div className="space-y-4">
-            {articles.map((a) => (
-              <Article
-                key={a.id_article}
-                id={a.id_article}
-                title={a.title}
-                text={a.text}
-                image={a.image_url ?? undefined}
-              />
-            ))}
-          </div>
-          <div className="flex justify-end">
- {isAdmin && (
-  <div className="flex justify-end">
-    <Link
-      to="/articles/new"
-      className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition"
-    >
-      ➕ Pridať článok
-    </Link>
-  </div>
-)}
-
-</div>
+          {articles.length > 0 && (
+            <div
+              ref={articleScrollerRef}
+              className="flex overflow-x-auto gap-4 pb-2 snap-x snap-mandatory scroll-smooth scrollbar-hide"
+            >
+              {articles.map((a) => (
+                <Link
+                  key={a.id_article}
+                  to={`/articles/${a.id_article}`}
+                  className="snap-center flex-shrink-0 w-80 md:w-96 lg:w-[28rem] transition-transform duration-300 hover:scale-[1.01]"
+                >
+                  <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-2xl shadow-md overflow-hidden border border-gray-200 dark:border-gray-800">
+                    <div className="h-40 w-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center overflow-hidden">
+                      {a.image_url ? (
+                        <img src={a.image_url} alt={a.title} className="h-full w-full object-contain" />
+                      ) : (
+                        <span className="text-sm text-gray-400">Bez obrazka</span>
+                      )}
+                    </div>
+                    <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+                      <div className="space-y-2">
+                        <h3 className="text-lg font-semibold line-clamp-2">{a.title}</h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3 break-words break-all">
+                          {a.text || "Bez obsahu"}
+                        </p>
+                      </div>
+                      {a.created_at && (
+                        <p className="text-xs text-gray-500">Publikovane: {String(a.created_at).slice(0, 10)}</p>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
 
         </section>
+
 
         {/* === MAP === */}
         <Map pins={dynamicPins} />
