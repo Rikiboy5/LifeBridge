@@ -996,12 +996,17 @@ def register_user():
     password_confirm = data.get("password_confirm")
     birthdate = data.get("birthdate")
     hobbies = data.get("hobbies", [])  # Array ID hobby
+    role = data.get("role") or data.get("rola")
+    allowed_roles = {"user_senior", "user_dobrovolnik", "user_firma"}
 
     # ✅ Kontrola povinných polí
     if not all([name, surname, email, password, password_confirm, birthdate]):
         return jsonify({"error": "Všetky polia sú povinné."}), 400
 
     # ✅ Kontrola zhody hesiel
+    if role not in allowed_roles:
+        return jsonify({"error": "Neplatna rola."}), 400
+
     if password != password_confirm:
         return jsonify({"error": "Heslá sa nezhodujú."}), 400
 
@@ -1032,10 +1037,10 @@ def register_user():
         # ✅ Vloženie nového používateľa
         cur.execute(
             """
-            INSERT INTO users (meno, priezvisko, mail, heslo, datum_narodenia)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO users (meno, priezvisko, mail, heslo, datum_narodenia, rola)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            (name, surname, email, hashed_pw, birthdate_formatted)
+            (name, surname, email, hashed_pw, birthdate_formatted, role)
         )
         conn.commit()
         
