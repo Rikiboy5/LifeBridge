@@ -114,6 +114,8 @@ export default function PostDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [postImages, setPostImages] = useState<PostImage[]>([]);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [lightboxAlt, setLightboxAlt] = useState<string>("");
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -141,6 +143,18 @@ export default function PostDetail() {
     const storedUser = localStorage.getItem("user");
     if (storedUser) setCurrentUser(JSON.parse(storedUser));
   }, []);
+
+  useEffect(() => {
+    if (!lightboxImage) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setLightboxImage(null);
+        setLightboxAlt("");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [lightboxImage]);
 
   useEffect(() => {
     if (!id) return;
@@ -356,6 +370,11 @@ export default function PostDetail() {
     ? formImage ?? mainGalleryUrl ?? resolveImage(post)
     : mainGalleryUrl ?? resolveImage(post);
 
+  const openLightbox = (url: string, alt: string) => {
+    setLightboxImage(url);
+    setLightboxAlt(alt);
+  };
+
   if (loading) {
     return (
       <MainLayout>
@@ -399,11 +418,18 @@ export default function PostDetail() {
         <div className="rounded-2xl bg-white dark:bg-gray-900 shadow-md overflow-hidden border border-gray-200 dark:border-gray-800">
           <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)]">
             <div className="bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-4">
-              <img
-                src={primaryImage}
-                alt={post.title}
-                className="max-h-64 w-full object-contain bg-white rounded-xl shadow-inner"
-              />
+              <button
+                type="button"
+                onClick={() => openLightbox(primaryImage, post.title)}
+                className="w-full cursor-zoom-in"
+                aria-label="Zobrazit obrazok na celu obrazovku"
+              >
+                <img
+                  src={primaryImage}
+                  alt={post.title}
+                  className="max-h-64 w-full object-contain bg-white rounded-xl shadow-inner"
+                />
+              </button>
             </div>
             <div className="p-6 space-y-4">
               <div className="flex items-center gap-3 flex-wrap">
@@ -533,7 +559,18 @@ export default function PostDetail() {
                   key={img.uid}
                   className="relative group aspect-square rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-center"
                 >
-                  <img src={img.url} alt={img.file_name || "Obrazok"} className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => openLightbox(img.url, img.file_name || "Obrazok")}
+                    className="w-full h-full cursor-zoom-in"
+                    aria-label="Zobrazit obrazok na celu obrazovku"
+                  >
+                    <img
+                      src={img.url}
+                      alt={img.file_name || "Obrazok"}
+                      className="w-full h-full object-cover"
+                    />
+                  </button>
                   {canEdit && (
                     <button
                       onClick={() => handleDeleteImage(img.uid)}
@@ -598,6 +635,40 @@ export default function PostDetail() {
           className="mt-0"
           pageSize={5}
         />
+
+        {lightboxImage && (
+          <div
+            className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => {
+              setLightboxImage(null);
+              setLightboxAlt("");
+            }}
+          >
+            <div
+              className="relative max-w-5xl w-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img
+                src={lightboxImage}
+                alt={lightboxAlt || "Obrazok"}
+                className="w-full max-h-[80vh] object-contain rounded-xl bg-white"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setLightboxImage(null);
+                  setLightboxAlt("");
+                }}
+                className="absolute -top-3 -right-3 bg-white text-gray-800 rounded-full w-9 h-9 shadow-md"
+                aria-label="Zatvorit"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </MainLayout>
   );
