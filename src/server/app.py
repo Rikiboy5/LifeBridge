@@ -786,6 +786,53 @@ def _save_post_image_from_data_url(conn, post_id: int, data_url: str):
     if not data_url or not data_url.startswith("data:image"):
         return None
 
+    match = re.match(r"data:image/(png|jpeg|jpg|gif|webp);base64,(.+)", data_url, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+
+    ext_raw, b64data = match.groups()
+    ext = "." + ext_raw.lower().replace("jpeg", "jpg")
+    if ext not in ALLOWED_IMAGE_EXTS:
+        return None
+
+    try:
+        blob = base64.b64decode(b64data)
+    except Exception as exc:
+        logging.warning("Post image base64 decode failed: %s", exc)
+        return None
+
+    file_uid = str(uuid.uuid4())
+    path = _post_image_disk_path(file_uid, ext)
+    try:
+        with open(path, "wb") as f:
+            f.write(blob)
+    except Exception as exc:
+        logging.warning("Post image save failed: %s", exc)
+        return None
+
+    size_bytes = os.path.getsize(path)
+    storage_path = f"/assets/img/posts/{file_uid}{ext}"
+    try:
+        storage_url, _ = _insert_post_image_record(
+            conn,
+            post_id,
+            file_uid=file_uid,
+            filename=f"post_{post_id}{ext}",
+            ext=ext,
+            mime_type=f"image/{ext.strip('.')}",
+            size_bytes=size_bytes,
+            storage_path=storage_path,
+            is_main=True,
+        )
+        return storage_url
+    except Exception as exc:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        logging.warning("Post image save failed: %s", exc)
+        return None
+
 
 def _save_article_image_from_data_url(conn, article_id: int, data_url: str):
     """
@@ -855,53 +902,6 @@ def _save_article_image_from_data_url(conn, article_id: int, data_url: str):
         return None
     finally:
         cur.close()
-
-    match = re.match(r"data:image/(png|jpeg|jpg|gif|webp);base64,(.+)", data_url, re.IGNORECASE | re.DOTALL)
-    if not match:
-        return None
-
-    ext_raw, b64data = match.groups()
-    ext = "." + ext_raw.lower().replace("jpeg", "jpg")
-    if ext not in ALLOWED_IMAGE_EXTS:
-        return None
-
-    try:
-        blob = base64.b64decode(b64data)
-    except Exception as exc:
-        logging.warning("Post image base64 decode failed: %s", exc)
-        return None
-
-    file_uid = str(uuid.uuid4())
-    path = _post_image_disk_path(file_uid, ext)
-    try:
-        with open(path, "wb") as f:
-            f.write(blob)
-    except Exception as exc:
-        logging.warning("Post image save failed: %s", exc)
-        return None
-
-    size_bytes = os.path.getsize(path)
-    storage_path = f"/assets/img/posts/{file_uid}{ext}"
-    try:
-        storage_url, _ = _insert_post_image_record(
-            conn,
-            post_id,
-            file_uid=file_uid,
-            filename=f"post_{post_id}{ext}",
-            ext=ext,
-            mime_type=f"image/{ext.strip('.')}",
-            size_bytes=size_bytes,
-            storage_path=storage_path,
-            is_main=True,
-        )
-        return storage_url
-    except Exception as exc:
-        try:
-            os.remove(path)
-        except Exception:
-            pass
-        logging.warning("Post image save failed: %s", exc)
-        return None
 
 # 🔒 Validácia hesla
 def validate_password(password):

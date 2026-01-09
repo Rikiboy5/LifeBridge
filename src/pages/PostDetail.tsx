@@ -114,8 +114,7 @@ export default function PostDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [postImages, setPostImages] = useState<PostImage[]>([]);
-  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
-  const [lightboxAlt, setLightboxAlt] = useState<string>("");
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -143,18 +142,6 @@ export default function PostDetail() {
     const storedUser = localStorage.getItem("user");
     if (storedUser) setCurrentUser(JSON.parse(storedUser));
   }, []);
-
-  useEffect(() => {
-    if (!lightboxImage) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setLightboxImage(null);
-        setLightboxAlt("");
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [lightboxImage]);
 
   useEffect(() => {
     if (!id) return;
@@ -266,14 +253,8 @@ export default function PostDetail() {
         const text = await res.text();
         throw new Error(text || "Nepodarilo sa ulozit prispevok.");
       }
-      setPost({
-        ...post,
-        title: formTitle,
-        category: formCategory,
-        description: formDescription,
-        image: formImage ?? null,
-      });
-      setEditing(false);
+      window.location.reload();
+      return;
     } catch (e: any) {
       alert(e.message || "Ukladanie zlyhalo.");
     } finally {
@@ -370,10 +351,55 @@ export default function PostDetail() {
     ? formImage ?? mainGalleryUrl ?? resolveImage(post)
     : mainGalleryUrl ?? resolveImage(post);
 
-  const openLightbox = (url: string, alt: string) => {
-    setLightboxImage(url);
-    setLightboxAlt(alt);
+  const lightboxItems = useMemo(() => {
+    const items = postImages
+      .filter((img) => img.url)
+      .map((img) => ({
+        url: img.url,
+        alt: img.file_name || "Obrazok",
+      }));
+    if (primaryImage && !items.some((img) => img.url === primaryImage)) {
+      return [{ url: primaryImage, alt: post?.title || "Obrazok" }, ...items];
+    }
+    if (!items.length && primaryImage) {
+      return [{ url: primaryImage, alt: post?.title || "Obrazok" }];
+    }
+    return items;
+  }, [post?.title, postImages, primaryImage]);
+
+  useEffect(() => {
+    if (lightboxIndex === null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setLightboxIndex(null);
+        return;
+      }
+      if (!lightboxItems.length) return;
+      if (event.key === "ArrowRight") {
+        setLightboxIndex((prev) => {
+          if (prev === null) return 0;
+          return (prev + 1) % lightboxItems.length;
+        });
+      }
+      if (event.key === "ArrowLeft") {
+        setLightboxIndex((prev) => {
+          if (prev === null) return 0;
+          return (prev - 1 + lightboxItems.length) % lightboxItems.length;
+        });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [lightboxIndex, lightboxItems]);
+
+  const openLightbox = (url: string) => {
+    if (!lightboxItems.length) return;
+    const idx = lightboxItems.findIndex((item) => item.url === url);
+    setLightboxIndex(idx >= 0 ? idx : 0);
   };
+
+  const currentLightbox = lightboxIndex === null ? null : lightboxItems[lightboxIndex];
+  const hasLightboxNav = lightboxItems.length > 1;
 
   if (loading) {
     return (
@@ -420,7 +446,7 @@ export default function PostDetail() {
             <div className="bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-4">
               <button
                 type="button"
-                onClick={() => openLightbox(primaryImage, post.title)}
+                onClick={() => openLightbox(primaryImage)}
                 className="w-full cursor-zoom-in"
                 aria-label="Zobrazit obrazok na celu obrazovku"
               >
@@ -561,7 +587,7 @@ export default function PostDetail() {
                 >
                   <button
                     type="button"
-                    onClick={() => openLightbox(img.url, img.file_name || "Obrazok")}
+                    onClick={() => openLightbox(img.url)}
                     className="w-full h-full cursor-zoom-in"
                     aria-label="Zobrazit obrazok na celu obrazovku"
                   >
@@ -636,14 +662,13 @@ export default function PostDetail() {
           pageSize={5}
         />
 
-        {lightboxImage && (
+        {currentLightbox && (
           <div
             className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
             role="dialog"
             aria-modal="true"
             onClick={() => {
-              setLightboxImage(null);
-              setLightboxAlt("");
+              setLightboxIndex(null);
             }}
           >
             <div
@@ -651,15 +676,44 @@ export default function PostDetail() {
               onClick={(e) => e.stopPropagation()}
             >
               <img
-                src={lightboxImage}
-                alt={lightboxAlt || "Obrazok"}
+                src={currentLightbox.url}
+                alt={currentLightbox.alt || "Obrazok"}
                 className="w-full max-h-[80vh] object-contain rounded-xl bg-white"
               />
+              {hasLightboxNav && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLightboxIndex((prev) => {
+                        if (prev === null) return 0;
+                        return (prev - 1 + lightboxItems.length) % lightboxItems.length;
+                      })
+                    }
+                    className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/70 text-white w-10 h-10 rounded-full"
+                    aria-label="Predchadzajuci obrazok"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLightboxIndex((prev) => {
+                        if (prev === null) return 0;
+                        return (prev + 1) % lightboxItems.length;
+                      })
+                    }
+                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/70 text-white w-10 h-10 rounded-full"
+                    aria-label="Dalsi obrazok"
+                  >
+                    ›
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => {
-                  setLightboxImage(null);
-                  setLightboxAlt("");
+                  setLightboxIndex(null);
                 }}
                 className="absolute -top-3 -right-3 bg-white text-gray-800 rounded-full w-9 h-9 shadow-md"
                 aria-label="Zatvorit"
