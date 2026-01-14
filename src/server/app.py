@@ -629,16 +629,33 @@ def _resequence_post_images(conn, post_id: int):
         cur.close()
 
 
+def _normalize_storage_path(path: str) -> str:
+    """
+    Normalize stored paths so frontend gets a clean /assets/... URL.
+    Accepts legacy "../assets/..." or "assets/..." and returns "/assets/...".
+    """
+    if not path:
+        return path
+    norm = str(path).strip().replace("\\", "/")
+    while norm.startswith("./"):
+        norm = norm[2:]
+    while norm.startswith("../"):
+        norm = norm[3:]
+    if not norm.startswith("/"):
+        norm = "/" + norm
+    return norm
+
 def _make_abs(url: str) -> str:
     """
-    Prefix relative /path with current host so frontend that uses post.image directly bude mať plnú URL.
+    Prefix relative /path with current host so frontend that uses post.image directly bude mat pln? URL.
     """
     if not url:
         return url
     if url.startswith("http://") or url.startswith("https://"):
         return url
+    norm = _normalize_storage_path(url)
     base = (request.host_url or "").rstrip("/")
-    return f"{base}{url}"
+    return f"{base}{norm}"
 
 
 def _delete_activity_image(conn, activity_id: int):
@@ -2281,7 +2298,7 @@ def upload_profile_avatar(user_id: int):
         if cur:
             cur.close()
 
-    return jsonify({"url": storage_path, "uid": file_uid}), 201
+    return jsonify({"url": _normalize_storage_path(storage_path), "uid": file_uid}), 201
 
 
 @app.get("/api/profile/<int:user_id>/avatar")
@@ -2291,7 +2308,7 @@ def get_profile_avatar_meta(user_id: int):
         meta = _find_avatar_meta(conn, user_id)
         if not meta:
             return jsonify({"error": "Avatar nen?jden?"}), 404
-        return jsonify({"url": meta["storage_path"], "uid": meta["file_uid"]}), 200
+        return jsonify({"url": _normalize_storage_path(meta["storage_path"]), "uid": meta["file_uid"]}), 200
     finally:
         conn.close()
 
