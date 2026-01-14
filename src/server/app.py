@@ -323,7 +323,11 @@ def find_best_matches_for_user(
 
 # Media storage for avatars (assets/img + DB metadata)
 BASE_DIR = os.path.dirname(__file__)
-ASSETS_IMG_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "assets", "img"))
+ASSETS_IMG_DIR = os.getenv("ASSETS_IMG_DIR")
+if ASSETS_IMG_DIR:
+    ASSETS_IMG_DIR = os.path.abspath(ASSETS_IMG_DIR)
+else:
+    ASSETS_IMG_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "assets", "img"))
 AVATARS_DIR = os.path.join(ASSETS_IMG_DIR, "avatars")
 POST_IMAGES_DIR = os.path.join(ASSETS_IMG_DIR, "posts")
 ACTIVITY_IMAGES_DIR = os.path.join(ASSETS_IMG_DIR, "activities")
