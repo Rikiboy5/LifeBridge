@@ -114,6 +114,7 @@ export default function PostDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [postImages, setPostImages] = useState<PostImage[]>([]);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -252,14 +253,8 @@ export default function PostDetail() {
         const text = await res.text();
         throw new Error(text || "Nepodarilo sa ulozit prispevok.");
       }
-      setPost({
-        ...post,
-        title: formTitle,
-        category: formCategory,
-        description: formDescription,
-        image: formImage ?? null,
-      });
-      setEditing(false);
+      window.location.reload();
+      return;
     } catch (e: any) {
       alert(e.message || "Ukladanie zlyhalo.");
     } finally {
@@ -356,6 +351,56 @@ export default function PostDetail() {
     ? formImage ?? mainGalleryUrl ?? resolveImage(post)
     : mainGalleryUrl ?? resolveImage(post);
 
+  const lightboxItems = useMemo(() => {
+    const items = postImages
+      .filter((img) => img.url)
+      .map((img) => ({
+        url: img.url,
+        alt: img.file_name || "Obrazok",
+      }));
+    if (primaryImage && !items.some((img) => img.url === primaryImage)) {
+      return [{ url: primaryImage, alt: post?.title || "Obrazok" }, ...items];
+    }
+    if (!items.length && primaryImage) {
+      return [{ url: primaryImage, alt: post?.title || "Obrazok" }];
+    }
+    return items;
+  }, [post?.title, postImages, primaryImage]);
+
+  useEffect(() => {
+    if (lightboxIndex === null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setLightboxIndex(null);
+        return;
+      }
+      if (!lightboxItems.length) return;
+      if (event.key === "ArrowRight") {
+        setLightboxIndex((prev) => {
+          if (prev === null) return 0;
+          return (prev + 1) % lightboxItems.length;
+        });
+      }
+      if (event.key === "ArrowLeft") {
+        setLightboxIndex((prev) => {
+          if (prev === null) return 0;
+          return (prev - 1 + lightboxItems.length) % lightboxItems.length;
+        });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [lightboxIndex, lightboxItems]);
+
+  const openLightbox = (url: string) => {
+    if (!lightboxItems.length) return;
+    const idx = lightboxItems.findIndex((item) => item.url === url);
+    setLightboxIndex(idx >= 0 ? idx : 0);
+  };
+
+  const currentLightbox = lightboxIndex === null ? null : lightboxItems[lightboxIndex];
+  const hasLightboxNav = lightboxItems.length > 1;
+
   if (loading) {
     return (
       <MainLayout>
@@ -399,11 +444,18 @@ export default function PostDetail() {
         <div className="rounded-2xl bg-white dark:bg-gray-900 shadow-md overflow-hidden border border-gray-200 dark:border-gray-800">
           <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)]">
             <div className="bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-4">
-              <img
-                src={primaryImage}
-                alt={post.title}
-                className="max-h-64 w-full object-contain bg-white rounded-xl shadow-inner"
-              />
+              <button
+                type="button"
+                onClick={() => openLightbox(primaryImage)}
+                className="w-full cursor-zoom-in"
+                aria-label="Zobrazit obrazok na celu obrazovku"
+              >
+                <img
+                  src={primaryImage}
+                  alt={post.title}
+                  className="max-h-64 w-full object-contain bg-white rounded-xl shadow-inner"
+                />
+              </button>
             </div>
             <div className="p-6 space-y-4">
               <div className="flex items-center gap-3 flex-wrap">
@@ -533,7 +585,18 @@ export default function PostDetail() {
                   key={img.uid}
                   className="relative group aspect-square rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-center"
                 >
-                  <img src={img.url} alt={img.file_name || "Obrazok"} className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => openLightbox(img.url)}
+                    className="w-full h-full cursor-zoom-in"
+                    aria-label="Zobrazit obrazok na celu obrazovku"
+                  >
+                    <img
+                      src={img.url}
+                      alt={img.file_name || "Obrazok"}
+                      className="w-full h-full object-cover"
+                    />
+                  </button>
                   {canEdit && (
                     <button
                       onClick={() => handleDeleteImage(img.uid)}
@@ -598,6 +661,68 @@ export default function PostDetail() {
           className="mt-0"
           pageSize={5}
         />
+
+        {currentLightbox && (
+          <div
+            className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => {
+              setLightboxIndex(null);
+            }}
+          >
+            <div
+              className="relative max-w-5xl w-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img
+                src={currentLightbox.url}
+                alt={currentLightbox.alt || "Obrazok"}
+                className="w-full max-h-[80vh] object-contain rounded-xl bg-white"
+              />
+              {hasLightboxNav && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLightboxIndex((prev) => {
+                        if (prev === null) return 0;
+                        return (prev - 1 + lightboxItems.length) % lightboxItems.length;
+                      })
+                    }
+                    className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/70 text-white w-10 h-10 rounded-full"
+                    aria-label="Predchadzajuci obrazok"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLightboxIndex((prev) => {
+                        if (prev === null) return 0;
+                        return (prev + 1) % lightboxItems.length;
+                      })
+                    }
+                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/70 text-white w-10 h-10 rounded-full"
+                    aria-label="Dalsi obrazok"
+                  >
+                    ›
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setLightboxIndex(null);
+                }}
+                className="absolute -top-3 -right-3 bg-white text-gray-800 rounded-full w-9 h-9 shadow-md"
+                aria-label="Zatvorit"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </MainLayout>
   );
