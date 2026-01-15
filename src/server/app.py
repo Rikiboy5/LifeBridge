@@ -327,7 +327,12 @@ ASSETS_IMG_DIR = os.getenv("ASSETS_IMG_DIR")
 if ASSETS_IMG_DIR:
     ASSETS_IMG_DIR = os.path.abspath(ASSETS_IMG_DIR)
 else:
-    ASSETS_IMG_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "assets", "img"))
+    default_assets = os.path.abspath(os.path.join(BASE_DIR, "..", "assets", "img"))
+    if not os.path.exists(default_assets):
+        alt_assets = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "assets", "img"))
+        if os.path.exists(alt_assets):
+            default_assets = alt_assets
+    ASSETS_IMG_DIR = default_assets
 AVATARS_DIR = os.path.join(ASSETS_IMG_DIR, "avatars")
 POST_IMAGES_DIR = os.path.join(ASSETS_IMG_DIR, "posts")
 ACTIVITY_IMAGES_DIR = os.path.join(ASSETS_IMG_DIR, "activities")
