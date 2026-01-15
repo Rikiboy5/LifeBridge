@@ -37,6 +37,7 @@ export default function ActivityDetail() {
   );
   const [signupsLoading, setSignupsLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -45,9 +46,12 @@ export default function ActivityDetail() {
         const parsed = JSON.parse(raw);
         const uid = parsed?.id ?? parsed?.id_user ?? null;
         setCurrentUserId(typeof uid === "number" ? uid : null);
+        const role = typeof parsed?.role === "string" ? parsed.role.toLowerCase() : null;
+        setCurrentUserRole(role);
       }
     } catch {
       setCurrentUserId(null);
+      setCurrentUserRole(null);
     }
   }, []);
 
@@ -89,6 +93,8 @@ export default function ActivityDetail() {
   }, [activity]);
 
   const isOwner = !!activity && !!currentUserId && Number(activity.user_id) === Number(currentUserId);
+  const isAdmin = currentUserRole === "admin" || currentUserId === 1;
+  const canEdit = isOwner || isAdmin;
   const isSignedUp = !!currentUserId && signups.some((s) => Number(s.id_user) === Number(currentUserId));
   const isFull = !!activity && activity.attendees_count >= activity.capacity && !isSignedUp;
 
@@ -132,7 +138,7 @@ export default function ActivityDetail() {
   };
 
   const handleSave = async () => {
-    if (!activity || !currentUserId || !Number.isFinite(activityId)) return;
+    if (!activity || !currentUserId || !Number.isFinite(activityId) || !canEdit) return;
     setSaving(true);
     try {
       const payload = {
@@ -196,7 +202,7 @@ export default function ActivityDetail() {
   };
 
   const handleCancelSignup = async () => {
-    if (!activity || !currentUserId) return;
+    if (!activity || !currentUserId || !canEdit) return;
     try {
       const res = await fetch(`/api/activities/${activityId}/signup`, {
         method: "DELETE",
@@ -270,7 +276,7 @@ export default function ActivityDetail() {
         <div className="space-y-4">
           <div className="flex items-start justify-between gap-3">
             <h1 className="text-3xl font-bold break-words">{activity.title}</h1>
-            {isOwner && (
+            {canEdit && (
               <div className="flex gap-2">
                 <button onClick={() => setEditing((v) => !v)} className="text-sm text-blue-600 hover:text-blue-700">
                   {editing ? "Zrusit" : "Upravit"}

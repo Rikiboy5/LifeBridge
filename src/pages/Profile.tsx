@@ -160,7 +160,7 @@ export default function Profile() {
       const raw = localStorage.getItem("user");
       if (!raw) return undefined;
       const u = JSON.parse(raw);
-      return u?.role;
+      return typeof u?.role === "string" ? u.role.toLowerCase() : undefined;
     } catch {
       return undefined;
     }
