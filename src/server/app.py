@@ -80,6 +80,25 @@ def db_conn():
         except Exception:
             pass
 
+def _normalize_role(role) -> str | None:
+    if role is None:
+        return None
+    return str(role).strip().lower()
+
+def _is_admin_role(role) -> bool:
+    return _normalize_role(role) == "admin"
+
+def _is_admin_user(conn, user_id: int) -> bool:
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT rola FROM users WHERE id_user = %s", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            return False
+        return _is_admin_role(row[0])
+    finally:
+        cur.close()
+
 def build_user_hobby_text(conn, user_id: int) -> str:
     cur = conn.cursor()
     try:
@@ -1116,6 +1135,8 @@ def login_user():
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT * FROM users WHERE mail = %s", (email,))
         user = cur.fetchone()
+        if user:
+            user["rola"] = _normalize_role(user.get("rola")) or "user"
 
         if not user:
             return jsonify({"error": "Používateľ neexistuje."}), 404
@@ -3003,7 +3024,8 @@ def update_activity(activity_id: int):
         owner_row = cur.fetchone()
         if not owner_row:
             return jsonify({"error": "Aktivita neexistuje."}), 404
-        if int(owner_row["user_id"]) != int(user_id):
+        is_admin = _is_admin_user(conn, int(user_id))
+        if int(owner_row["user_id"]) != int(user_id) and not is_admin:
             return jsonify({"error": "Nemáš oprávnenie upraviť túto aktivitu."}), 403
 
         sets = []
@@ -3179,7 +3201,8 @@ def delete_activity_record(activity_id: int):
         row = cur.fetchone()
         if not row:
             return jsonify({"error": "Aktivita neexistuje."}), 404
-        if int(row["user_id"]) != int(user_id):
+        is_admin = _is_admin_user(conn, int(user_id))
+        if int(row["user_id"]) != int(user_id) and not is_admin:
             return jsonify({"error": "Nemate opravnenie zmazat tuto aktivitu."}), 403
 
         _delete_activity_image(conn, activity_id)
